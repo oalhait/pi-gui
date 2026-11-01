@@ -121,5 +121,5 @@ dmg:
 
 publish:
   provider: github
-  owner: minghinmatthewlam
+  owner: oalhait
   repo: pi-gui

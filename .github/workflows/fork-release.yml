@@ -1,0 +1,51 @@
+name: Personal macOS release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-macos-release
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: github.repository == 'oalhait/pi-gui'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify
+        run: pnpm check
+      - name: Build
+        run: pnpm --filter @pi-gui/desktop build
+      - name: Package personal build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          cd apps/desktop
+          pnpm exec electron-builder --mac --arm64 --dir --publish never -c.mac.notarize=false -c.mac.identity=null
+          codesign --force --deep --sign - release/mac-arm64/pi-gui.app
+          codesign --verify --deep --strict release/mac-arm64/pi-gui.app
+      - name: Check packaged dependencies
+        run: pnpm --dir apps/desktop verify:packaged-runtime-deps
+      - name: Stage draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          node scripts/verify-release-version.mjs --tag "v$VERSION"
+          mkdir -p personal-release
+          ditto -c -k --sequesterRsrc --keepParent apps/desktop/release/mac-arm64/pi-gui.app "personal-release/pi-gui-$VERSION-arm64.zip"
+          (cd personal-release && shasum -a 256 *.zip > SHA256SUMS)
+          gh release create "v$VERSION" personal-release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "pi-gui $VERSION · Omar’s fork" --notes-file docs/personal-release-notes.md

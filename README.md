@@ -1,9 +1,13 @@
 # pi-gui
 
+Omar’s personal distribution fork of [minghinmatthewlam/pi-gui](https://github.com/minghinmatthewlam/pi-gui).
+It includes native browser pages in the workbench, app navigation, compaction fixes, provider usage limits,
+and Mark as unread. See [fork releases and maintenance](docs/fork-maintenance.md).
+
 The desktop app for the [pi](https://github.com/earendil-works/pi) coding agent.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/minghinmatthewlam/pi-gui?include_prereleases&label=release)](https://github.com/minghinmatthewlam/pi-gui/releases)
+[![Latest release](https://img.shields.io/github/v/release/oalhait/pi-gui?include_prereleases&label=release)](https://github.com/oalhait/pi-gui/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#install)
 
 Run agents in parallel threads, each in its own git worktree if you want one. Review every
@@ -84,30 +88,18 @@ the review tab, your worktrees, and tabs from desktop extensions. Each task keep
 
 ## Install
 
-pi-gui runs on macOS (Apple Silicon), Linux (x64) and Windows (x64).
+This fork’s initial release is a **macOS arm64 ZIP**, available from the
+[Releases page](https://github.com/oalhait/pi-gui/releases). Unzip it and place `pi-gui.app`
+in Applications after quitting the previous build. Back up the profile first; see
+[fork maintenance](docs/fork-maintenance.md).
 
-Download the latest `.dmg` (macOS), `.AppImage` or `.deb` (Linux), or `.exe` (Windows) from the
-[Releases page](https://github.com/minghinmatthewlam/pi-gui/releases).
+Personal builds are ad-hoc signed, **not Apple-notarized**. Gatekeeper acceptance on a
+fresh Mac is not guaranteed. The fork does not currently publish Linux or Windows binaries.
 
-- **macOS:** drag `pi-gui.app` into Applications. Releases are signed and notarized.
-- **Linux:** make the AppImage executable and run it, or install the `.deb`.
-- **Windows:** run the setup `.exe`, or use the portable `.exe`. Builds are not code-signed
-  yet, so SmartScreen may ask you to confirm.
-
-On macOS you can also use Homebrew:
-
-```bash
-brew tap minghinmatthewlam/tap
-brew trust minghinmatthewlam/tap
-brew install --cask pi-gui
-```
-
-Homebrew refuses to load casks from untrusted third-party taps, so the
-`brew trust` step is required on first install.
-
-Update with `brew upgrade --cask pi-gui`. A Homebrew upgrade may ask you to
-re-confirm macOS permissions or Dock placement. Other installs tell you when a new release is
-out and update from the Releases page.
+The [original project’s releases](https://github.com/minghinmatthewlam/pi-gui/releases)
+and `minghinmatthewlam/tap` Homebrew cask install the upstream distribution, not this fork.
+A Homebrew upgrade would replace this personal build. This fork checks its own Releases
+page for newer versions; install those updates manually.
 
 Building from source is for contributors; see [Development](#development).
 

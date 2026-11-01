@@ -175,7 +175,7 @@ verify_deb_archive() {
   assert_control_field Section "devel"
   assert_control_field Priority "optional"
   assert_control_field Maintainer "Matthew Lam <minghinmatthew.lam@gmail.com>"
-  assert_control_field Homepage "https://github.com/minghinmatthewlam/pi-gui"
+  assert_control_field Homepage "https://github.com/oalhait/pi-gui"
 
   local description
   description="$(dpkg-deb --field "$deb" Description | head -n 1)"
