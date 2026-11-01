@@ -1,3 +1,4 @@
+import { renderBrowserPanel } from "../features/workbench/browser-panel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
 import {
@@ -1369,6 +1370,7 @@ export default function App() {
               />
             ) : activeTool && activeTool.kind !== "extension" ? (
               renderBuiltinToolPanel(activeTool.kind, {
+                browser: () => renderBrowserPanel(api, workbenchTarget, selectedSessionKey),
                 changes: () => (
                   <DiffPanel
                     key={selectedSessionKey}

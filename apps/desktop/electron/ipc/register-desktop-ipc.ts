@@ -1,3 +1,4 @@
+import { registerBrowserRequests } from "./browser-requests";
 import { ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import type { SessionRef } from "@pi-gui/session-driver";
@@ -241,6 +242,7 @@ export function registerDesktopIpc({
   capabilities,
 }: RegisterDesktopIpcOptions): void {
   const handleMainFrame = mainFrameHandler(windows);
+  registerBrowserRequests(handleMainFrame, windows);
   registerReviewRequests(handleMainFrame, owners.review);
   registerExtensionViewRequests(handleMainFrame, windows, owners.extensionViews);
   const workbench = new WorkbenchRequests(owners.workbench);

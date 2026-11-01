@@ -1,3 +1,4 @@
+import { routeBrowserChromeShortcut } from "./platform/browser-owner";
 import {
   app,
   BrowserWindow,
@@ -562,6 +563,8 @@ function createWindow(): BrowserWindow {
     if (input.type !== "keyDown") {
       return;
     }
+
+    if (routeBrowserChromeShortcut(window.webContents, event, input)) return;
 
     // Side panel tab chords act from the terminal and extension views too. The
     // key is not consumed: that would also swallow the modifier's keyup, leaving

@@ -1,3 +1,10 @@
+import type {
+  BrowserAction,
+  BrowserLayout,
+  BrowserMount,
+  BrowserPanelState,
+  BrowserPanelEvent,
+} from "./browser";
 import type { ProviderUsage } from "@pi-gui/session-driver";
 import type {
   ExtensionViewOpenFile,
@@ -109,6 +116,11 @@ export type NewMcpServerInput = { readonly name: string; readonly description?: 
 );
 
 export const desktopIpc = {
+  browserAttach: "pi-gui:browser-attach",
+  browserLayout: "pi-gui:browser-layout",
+  browserDetach: "pi-gui:browser-detach",
+  browserAction: "pi-gui:browser-action",
+  browserChanged: "pi-gui:browser-changed",
   extensionViewOpenFile: "pi-gui:extension-view-open-file",
   listExtensionViews: "pi-gui:list-extension-views",
   openExtensionView: "pi-gui:open-extension-view",
@@ -735,6 +747,11 @@ export function isCloseFocusedSurfaceShortcut(input: {
 export const drawWindowControlsArgument = "--pi-draw-window-controls";
 
 export interface PiDesktopApi {
+  attachBrowser(input: BrowserMount): Promise<BrowserPanelState>;
+  layoutBrowser(input: BrowserLayout): Promise<void>;
+  detachBrowser(mountId: string): Promise<void>;
+  browserAction(input: BrowserAction): Promise<BrowserPanelState>;
+  onBrowserChanged(listener: (event: BrowserPanelEvent) => void): () => void;
   platform: NodeJS.Platform;
   /** True when the window has no native title bar and the app draws its own. */
   drawsWindowControls: boolean;

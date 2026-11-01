@@ -1,3 +1,10 @@
+import type {
+  BrowserAction,
+  BrowserLayout,
+  BrowserMount,
+  BrowserPanelState,
+  BrowserPanelEvent,
+} from "../contracts/browser";
 import type { ProviderUsage } from "@pi-gui/session-driver";
 import type {
   ExtensionViewOpenFile,
@@ -120,6 +127,16 @@ ipcRenderer.on(desktopIpc.appCommand, (_event, command: PiDesktopCommand) => {
 });
 
 contextBridge.exposeInMainWorld("piApp", {
+  attachBrowser: (input: BrowserMount) =>
+    ipcRenderer.invoke(desktopIpc.browserAttach, input) as Promise<BrowserPanelState>,
+  layoutBrowser: (input: BrowserLayout) =>
+    ipcRenderer.invoke(desktopIpc.browserLayout, input) as Promise<void>,
+  detachBrowser: (mountId: string) =>
+    ipcRenderer.invoke(desktopIpc.browserDetach, mountId) as Promise<void>,
+  browserAction: (input: BrowserAction) =>
+    ipcRenderer.invoke(desktopIpc.browserAction, input) as Promise<BrowserPanelState>,
+  onBrowserChanged: (listener: (event: BrowserPanelEvent) => void) =>
+    subscribeIpc(desktopIpc.browserChanged, listener),
   platform: process.platform,
   drawsWindowControls: process.argv.includes(drawWindowControlsArgument),
   versions: process.versions,
