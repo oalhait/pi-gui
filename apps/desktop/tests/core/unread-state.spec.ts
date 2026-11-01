@@ -72,6 +72,10 @@ test("selecting an unread thread persists read state through the latest known ac
     const window = await secondRun.firstWindow();
     const row = window.locator(".session-row", { hasText: title });
     await expect(row).toHaveAttribute("data-sidebar-indicator", "unseen");
+    await expect(row.locator(".session-row__status--unseen")).toHaveCSS(
+      "background-color",
+      "rgb(232, 191, 91)",
+    );
 
     await selectSession(window, title);
     await expect(row).toHaveAttribute("data-sidebar-indicator", "none");
