@@ -1,3 +1,4 @@
+import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "./workbench-agent";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -116,6 +117,9 @@ export type NewMcpServerInput = { readonly name: string; readonly description?: 
 );
 
 export const desktopIpc = {
+  workbenchAgentCancel: "pi-gui:workbench-agent-cancel",
+  workbenchAgentRequest: "pi-gui:workbench-agent-request",
+  workbenchAgentResponse: "pi-gui:workbench-agent-response",
   browserAttach: "pi-gui:browser-attach",
   browserLayout: "pi-gui:browser-layout",
   browserDetach: "pi-gui:browser-detach",
@@ -747,6 +751,9 @@ export function isCloseFocusedSurfaceShortcut(input: {
 export const drawWindowControlsArgument = "--pi-draw-window-controls";
 
 export interface PiDesktopApi {
+  onWorkbenchAgentCancel(listener: (id: string) => void): () => void;
+  onWorkbenchAgentRequest(listener: (request: WorkbenchAgentRequest) => void): () => void;
+  respondWorkbenchAgentRequest(response: WorkbenchAgentResponse): Promise<void>;
   attachBrowser(input: BrowserMount): Promise<BrowserPanelState>;
   layoutBrowser(input: BrowserLayout): Promise<void>;
   detachBrowser(mountId: string): Promise<void>;

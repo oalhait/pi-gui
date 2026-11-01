@@ -1,3 +1,4 @@
+import { useWorkbenchAgent } from "./use-workbench-agent";
 import { useBrowserWorkbench } from "./use-browser-workbench";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import type { SessionRef } from "@pi-gui/session-driver/types";
@@ -229,11 +230,12 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
   );
 
   const openFile = useCallback(
-    async (file: WorkspaceFileReference): Promise<void> => {
+    async (file: WorkspaceFileReference, beforeApply?: () => void): Promise<void> => {
       const { target: ref, api: desktopApi } = current.current;
       if (!ref || !desktopApi) return;
       // Host validation must succeed before a transcript link changes any tab state.
       await desktopApi.readWorkspaceFile(file.workspaceId, file.path);
+      beforeApply?.();
       // The link belongs to the task shown when it was opened; a task switch during the read cancels it.
       const latest = current.current.target;
       if (!latest || targetKey(latest) !== targetKey(ref)) return;
@@ -270,5 +272,7 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
 export type WorkbenchLayout = ReturnType<typeof useWorkbenchLayout>;
 export function useWorkbench(options: UseWorkbenchOptions) {
   const layout = useWorkbenchLayout(options);
-  return useBrowserWorkbench(options.api, options.target, layout);
+  const workbench = useBrowserWorkbench(options.api, options.target, layout);
+  useWorkbenchAgent(options.api, options.target, workbench);
+  return workbench;
 }

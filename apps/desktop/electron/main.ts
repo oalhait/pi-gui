@@ -1,3 +1,9 @@
+import {
+  WorkbenchAgentOwner,
+  createWorkbenchAgentExtension,
+  createWorkbenchAgentTool,
+} from "./platform/workbench-agent";
+import { mainFrameHandler } from "./ipc/main-frame-ipc";
 import { routeBrowserChromeShortcut } from "./platform/browser-owner";
 import {
   app,
@@ -1034,6 +1040,12 @@ app
     protocol.handle(DESKTOP_EXTENSION_SCHEME, (request) =>
       extensionViews.assetResponse(request.url),
     );
+    const workbenchAgent = new WorkbenchAgentOwner(() => windowOwner);
+    const runWorkbenchCommand: Parameters<typeof createWorkbenchAgentTool>[0] = (
+      ctx,
+      command,
+      signal,
+    ) => workbenchAgent.execute(sessionRefFromExtensionContext(ctx), command, signal);
     const driverOptions: NonNullable<
       ConstructorParameters<typeof DesktopAppStore>[0]["driverOptions"]
     > = {
@@ -1048,6 +1060,12 @@ app
       },
       openUrl: openMcpSignInUrl,
       builtinExtensions: [
+        {
+          name: "pi-gui-workbench",
+          displayName: "Side pane controls",
+          description: "Lets pi open browser pages and manage this chat’s side pane",
+          factory: createWorkbenchAgentExtension(runWorkbenchCommand),
+        },
         {
           name: "pi-gui-thread-orchestration",
           displayName: "Thread orchestration",
@@ -1086,6 +1104,7 @@ app
         notificationPermissionService?.trackWindow(window);
       },
     });
+    workbenchAgent.register(mainFrameHandler(windowOwner));
     await store.initialize();
     themeManager.setMode(store.snapshot().themeMode);
     integratedTerminalShell = (await store.getState()).integratedTerminalShell;
@@ -1116,6 +1135,14 @@ app
           },
           promptForText: (message: string, placeholder?: string, allowEmpty?: boolean) =>
             promptForText(mainWindow, message, placeholder ?? "", allowEmpty ?? false),
+          runWorkbenchRuntimeTool: (input: OrchestrationRuntimeToolTestInput) =>
+            createWorkbenchAgentTool(runWorkbenchCommand).execute(
+              input.toolCallId ?? "workbench-test",
+              input.params,
+              undefined,
+              undefined,
+              createTestExtensionContext(input.sessionRef),
+            ),
           runOrchestrationRuntimeTool: (input: OrchestrationRuntimeToolTestInput) =>
             runOrchestrationRuntimeToolForTest(orchestrationRuntimeBridge, input),
           runScheduledTaskRuntimeTool: (input: ScheduledTaskRuntimeToolTestInput) =>

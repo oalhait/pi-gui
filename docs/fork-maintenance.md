@@ -18,6 +18,19 @@ The main process persists pages and the selected page per chat in `browser-tabs.
 One saved Browser tool slot supplies all of that chat’s website tabs in the workbench row. Switching to another tool hides the native page without closing it.
 Existing browser tabs and their saved website logins are retained.
 
+## Agent side pane controls
+
+The built-in `workbench` tool lets Pi agents open browser pages and Files, Review, Terminal or
+extension tabs, inspect/select/close tabs, navigate pages and show/hide the side pane.
+It uses pi-gui’s own controllers, so it does not require macOS Accessibility or Screen Recording.
+
+The main process derives the requesting chat from Pi’s session context and accepts responses
+only from that chat’s owned app window. The requesting chat must be selected in a pi-gui window; the window does not have to be focused.
+Requests for a chat that is not selected in any window fail without switching the user to it. Cancellation is checked before deferred
+file opens, and browser navigation retains the exact page ID across delayed replies. Use `list` to
+obtain `tab_id` for an existing browser page; without it, navigation targets the selected browser tab.
+This tool manages the application’s pane; it does not provide web page DOM automation.
+
 ## Compatibility and backups
 
 Keep the `com.pi-gui.desktop` app ID, `pi` userData directory, `~/.pi/agent` directory,

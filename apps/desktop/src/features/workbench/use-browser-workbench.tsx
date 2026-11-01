@@ -95,6 +95,15 @@ export function useBrowserWorkbench(
       api.detachBrowser(mountId).catch(console.error);
     };
   }, [api, enabled, mountId, target?.workspaceId, target?.sessionId, accept]);
+  const performBrowserAction = useCallback(
+    async (action: Omit<BrowserAction, "mountId">) => {
+      if (!api) throw new Error("Browser is unavailable.");
+      const next = await api.browserAction({ ...action, mountId });
+      accept(next);
+      return next;
+    },
+    [api, mountId, accept],
+  );
   const lastAction = useRef(0);
   const act = useCallback(
     (action: Omit<BrowserAction, "mountId">) => {
@@ -164,6 +173,8 @@ export function useBrowserWorkbench(
     activateTool,
     closeTool,
     presentation: { view, browserTabs: state?.tabs },
+    browserState: state,
+    performBrowserAction,
     browserPanel:
       api && enabled ? (
         <BrowserPanel

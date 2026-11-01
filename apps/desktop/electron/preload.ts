@@ -1,3 +1,4 @@
+import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "../contracts/workbench-agent";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -127,6 +128,12 @@ ipcRenderer.on(desktopIpc.appCommand, (_event, command: PiDesktopCommand) => {
 });
 
 contextBridge.exposeInMainWorld("piApp", {
+  onWorkbenchAgentCancel: (listener: (id: string) => void) =>
+    subscribeIpc(desktopIpc.workbenchAgentCancel, listener),
+  onWorkbenchAgentRequest: (listener: (request: WorkbenchAgentRequest) => void) =>
+    subscribeIpc(desktopIpc.workbenchAgentRequest, listener),
+  respondWorkbenchAgentRequest: (response: WorkbenchAgentResponse) =>
+    ipcRenderer.invoke(desktopIpc.workbenchAgentResponse, response) as Promise<void>,
   attachBrowser: (input: BrowserMount) =>
     ipcRenderer.invoke(desktopIpc.browserAttach, input) as Promise<BrowserPanelState>,
   layoutBrowser: (input: BrowserLayout) =>
