@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "@pi-gui/session-driver";
 import type {
   ExtensionViewOpenFile,
   DesktopExtensionViewInfo,
@@ -347,6 +348,8 @@ contextBridge.exposeInMainWorld("piApp", {
       sessionId,
       thinkingLevel,
     ) as Promise<DesktopAppState>,
+  getProviderUsage: (workspaceId: string) =>
+    ipcRenderer.invoke(desktopIpc.providerUsage, workspaceId) as Promise<readonly ProviderUsage[]>,
   loginProvider: (workspaceId: string, providerId: string) =>
     ipcRenderer.invoke(
       desktopIpc.loginProvider,

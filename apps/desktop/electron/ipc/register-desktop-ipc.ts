@@ -146,6 +146,7 @@ type SettingsOwner = Pick<
   | "setModelSettingsScopeMode"
   | "setDefaultModel"
   | "setDefaultThinkingLevel"
+  | "getProviderUsage"
   | "loginProvider"
   | "logoutProvider"
   | "setProviderApiKey"
@@ -502,6 +503,11 @@ export function registerDesktopIpc({
           expectThinkingLevel(thinkingLevel),
         ),
       ),
+  );
+  handleMainFrame(
+    desktopIpc.providerUsage,
+    (raw) => expectNonEmptyString(raw, "workspaceId"),
+    (workspaceId) => owners.settings.getProviderUsage(workspaceId),
   );
   ipcMain.handle(
     desktopIpc.loginProvider,

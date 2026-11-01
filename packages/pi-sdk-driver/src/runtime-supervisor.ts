@@ -1,3 +1,4 @@
+import { ProviderUsageReader } from "./provider-usage.js";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
@@ -132,6 +133,7 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
   private readonly isBuiltinExtensionEnabled: BuiltinExtensionEnabled;
   private readonly customProviderStore: CustomProviderStore;
   private readonly contexts = new Map<string, RuntimeContext>();
+  private readonly providerUsage = new ProviderUsageReader();
 
   constructor(options: RuntimeSupervisorOptions = {}) {
     const deps = createRuntimeDependencies(options);
@@ -146,6 +148,16 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
   async getRuntimeSnapshot(workspace: WorkspaceRef): Promise<RuntimeSnapshot> {
     const context = await this.ensureContext(workspace);
     return this.buildSnapshot(context);
+  }
+
+  async getProviderUsage(workspace: WorkspaceRef) {
+    const context = await this.ensureContext(workspace);
+    const snapshot = await this.buildSnapshot(context);
+    return Promise.all(
+      snapshot.providers
+        .filter((provider) => provider.hasAuth)
+        .map((provider) => this.providerUsage.read(context.modelRuntime, provider.id)),
+    );
   }
 
   async refreshRuntime(workspace: WorkspaceRef): Promise<RuntimeSnapshot> {

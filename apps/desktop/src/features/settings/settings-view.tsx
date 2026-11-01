@@ -167,6 +167,7 @@ export function SettingsView({
 
           {section === "providers" ? (
             <SettingsProvidersSection
+              workspaceId={workspace?.id}
               runtime={runtime}
               onLoginProvider={onLoginProvider}
               onLogoutProvider={onLogoutProvider}

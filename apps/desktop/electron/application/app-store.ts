@@ -1973,6 +1973,13 @@ export class DesktopAppStore {
     });
   }
 
+  async getProviderUsage(workspaceId: string) {
+    await this.initialize();
+    const workspace = this.workspaceRefFromState(workspaceId);
+    if (!workspace) throw new Error("Unknown workspace.");
+    return this.driver.runtimeSupervisor.getProviderUsage(workspace);
+  }
+
   private async withRuntimeUpdate(
     workspaceId: string,
     action: (ws: WorkspaceRef) => Promise<RuntimeSnapshot>,
