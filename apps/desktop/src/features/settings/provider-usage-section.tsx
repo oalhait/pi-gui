@@ -1,9 +1,10 @@
+import { useTranslation } from "../../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProviderUsage } from "@pi-gui/session-driver";
 import type { RuntimeProviderRecord } from "@pi-gui/session-driver/runtime-types";
 
-const dateLabel = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
+const dateLabel = (value: string, locale: string) =>
+  new Date(value).toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -17,6 +18,7 @@ export function ProviderUsageSection({
   readonly workspaceId: string;
   readonly providers: readonly RuntimeProviderRecord[];
 }) {
+  const { t, locale } = useTranslation();
   const [usage, setUsage] = useState<readonly ProviderUsage[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
@@ -46,7 +48,7 @@ export function ProviderUsageSection({
   return (
     <section className="settings-section provider-usage" data-testid="provider-usage">
       <div className="settings-section__header">
-        <h3 className="settings-section__title">Usage limits</h3>
+        <h3 className="settings-section__title">{t("settings.usage.title")}</h3>
         <button
           className="button"
           type="button"
@@ -55,13 +57,11 @@ export function ProviderUsageSection({
             refresh().catch(() => setError(true));
           }}
         >
-          {pending ? "Checking…" : "Refresh usage"}
+          {pending ? t("settings.usage.checking") : t("settings.usage.refresh")}
         </button>
       </div>
-      <p className="settings-section__description">
-        Account limits include usage outside Pi. Checks are cached for one minute.
-      </p>
-      {error ? <p role="alert">Could not load usage limits. Try refreshing.</p> : null}
+      <p className="settings-section__description">{t("settings.usage.description")}</p>
+      {error ? <p role="alert">{t("settings.usage.error")}</p> : null}
       <div className="settings-group" aria-busy={pending}>
         {providers.map((provider) => {
           const current = usage.find((item) => item.providerId === provider.id);
@@ -79,18 +79,23 @@ export function ProviderUsageSection({
                     <div className="provider-usage__line">
                       <span>{window.label}</span>
                       <span>
-                        {Math.round(window.usedPercent)}% used ·{" "}
-                        {Math.max(0, Math.round(100 - window.usedPercent))}% remaining
+                        {t("settings.usage.fraction", {
+                          used: Math.round(window.usedPercent),
+                          remaining: Math.max(0, Math.round(100 - window.usedPercent)),
+                        })}
                       </span>
                     </div>
                     <progress
                       max={100}
                       value={Math.min(100, window.usedPercent)}
-                      aria-label={`${provider.name} ${window.label} usage`}
+                      aria-label={t("settings.usage.progress", {
+                        provider: provider.name,
+                        window: window.label,
+                      })}
                     />
                     {window.resetsAt ? (
                       <div className="provider-usage__note">
-                        Resets {dateLabel(window.resetsAt)}
+                        {t("settings.usage.resets", { time: dateLabel(window.resetsAt, locale) })}
                       </div>
                     ) : null}
                   </div>
@@ -98,12 +103,12 @@ export function ProviderUsageSection({
               ) : (
                 <p className="provider-usage__note">
                   {current?.message ??
-                    (pending ? "Checking account limits…" : "Usage limits are unavailable.")}
+                    (pending ? t("settings.usage.pending") : t("settings.usage.unavailable"))}
                 </p>
               )}
               {current?.checkedAt ? (
                 <div className="provider-usage__note">
-                  Last checked {dateLabel(current.checkedAt)}
+                  {t("settings.usage.checked", { time: dateLabel(current.checkedAt, locale) })}
                 </div>
               ) : null}
             </div>

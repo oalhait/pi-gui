@@ -7,6 +7,18 @@
 import type { PluralCategory, PluralVariantKey } from "../plural";
 
 export const en = {
+  "settings.usage.title": "Usage limits",
+  "settings.usage.checking": "Checking…",
+  "settings.usage.refresh": "Refresh usage",
+  "settings.usage.description":
+    "Account limits include usage outside Pi. Checks are cached for one minute.",
+  "settings.usage.error": "Could not load usage limits. Try refreshing.",
+  "settings.usage.fraction": "{used}% used · {remaining}% remaining",
+  "settings.usage.progress": "{provider} {window} usage",
+  "settings.usage.resets": "Resets {time}",
+  "settings.usage.pending": "Checking account limits…",
+  "settings.usage.unavailable": "Usage limits are unavailable.",
+  "settings.usage.checked": "Last checked {time}",
   "models.enabledCount": "{enabled} of {total}",
   "models.count": "{count} models",
   "models.count_one": "{count} model",
