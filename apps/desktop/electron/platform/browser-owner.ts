@@ -136,9 +136,11 @@ export class BrowserOwner {
       root = { key, tabs: [], activeTabId: "", revision: 0 };
       host.roots.set(key, root);
       const saved = this.saved[key];
-      for (const url of saved?.urls ?? ["about:blank"]) this.createTab(host, root, url);
+      for (const url of saved?.urls.length ? saved.urls : ["about:blank"])
+        this.createTab(host, root, url);
       root.activeTabId = root.tabs[saved?.active ?? 0]?.id ?? root.tabs[0]?.id ?? "";
     }
+    if (!root.tabs.length) root.activeTabId = this.createTab(host, root, "about:blank").id;
     const activeHost = host;
     chromeShortcuts.set(window.webContents, (event, input) =>
       activeHost.layout?.focused ? this.shortcut(activeHost, event, input) : false,
@@ -207,7 +209,7 @@ export class BrowserOwner {
           contents.close();
           if (root.activeTabId === tab.id)
             root.activeTabId = root.tabs[Math.min(index, root.tabs.length - 1)]?.id ?? "";
-          if (!root.tabs.length) root.activeTabId = this.createTab(host, root, "about:blank").id;
+
           break;
         }
       }
@@ -299,7 +301,7 @@ export class BrowserOwner {
       host.window.contentView.removeChildView(view);
       if (root.activeTabId === tab.id)
         root.activeTabId = root.tabs[Math.min(index, root.tabs.length - 1)]?.id ?? "";
-      if (!root.tabs.length) root.activeTabId = this.createTab(host, root, "about:blank").id;
+
       this.present(host);
       this.save(host, root);
       publish();

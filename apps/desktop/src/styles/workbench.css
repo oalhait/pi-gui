@@ -242,54 +242,6 @@
   min-height: 0;
   background: var(--main);
 }
-.browser-panel__tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px;
-  border-bottom: 1px solid var(--line);
-}
-.browser-panel__tabs > [role="tablist"] {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  overflow: auto;
-  gap: 4px;
-}
-.browser-panel__tab {
-  display: flex;
-  align-items: center;
-  min-width: 100px;
-  max-width: 200px;
-  flex: 1;
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-}
-.browser-panel__tab--active {
-  background: var(--surface-muted);
-  color: var(--text);
-}
-.browser-panel__tab button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
-  min-width: 0;
-}
-.browser-panel__tab [role="tab"] {
-  flex: 1;
-}
-.browser-panel__tab span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-}
-.browser-panel__tab svg {
-  width: 12px;
-  height: 12px;
-  flex: none;
-}
 .browser-panel__toolbar {
   display: flex;
   align-items: center;

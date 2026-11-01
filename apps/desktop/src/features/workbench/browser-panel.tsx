@@ -1,75 +1,44 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { WorkspaceSessionTarget } from "../../../contracts/desktop-state";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PiDesktopApi } from "../../../contracts/ipc";
 import {
   browserShortcut,
   type BrowserAction,
   type BrowserPanelState,
+  type BrowserPanelEvent,
 } from "../../../contracts/browser";
-import {
-  BrowserPreviewIcon,
-  ChevronRightIcon,
-  CloseIcon,
-  PlusIcon,
-  RefreshIcon,
-} from "../../ui/icons";
+import { BrowserPreviewIcon, ChevronRightIcon, CloseIcon, RefreshIcon } from "../../ui/icons";
 
 export function BrowserPanel({
   api,
-  target,
+  mountId,
+  state,
+  event,
+  error,
+  act,
 }: {
   readonly api: PiDesktopApi;
-  readonly target: WorkspaceSessionTarget;
+  readonly mountId: string;
+  readonly state: BrowserPanelState | null;
+  readonly event?: BrowserPanelEvent;
+  readonly error: string;
+  readonly act: (action: Omit<BrowserAction, "mountId">) => void;
 }) {
-  const [mountId] = useState(() => crypto.randomUUID());
-  const [state, setState] = useState<BrowserPanelState | null>(null);
   const [address, setAddress] = useState("");
-  const [error, setError] = useState("");
   const viewport = useRef<HTMLDivElement>(null);
   const addressInput = useRef<HTMLInputElement>(null);
-  const alive = useRef(false);
-  const lastRevision = useRef(-1);
-  const lastAction = useRef(0);
-  const acceptState = useCallback((next: BrowserPanelState) => {
-    if (next.revision < lastRevision.current) return false;
-    lastRevision.current = next.revision;
-    setState(next);
-    return true;
-  }, []);
   const editingAddress = useRef(false);
   const shownTabId = useRef<string | undefined>(undefined);
-  const tabList = useRef<HTMLDivElement>(null);
   const tab = state?.tabs.find((entry) => entry.id === state.activeTabId);
-
-  useEffect(() => {
-    alive.current = true;
-    const unsubscribe = api.onBrowserChanged((event) => {
-      if (event.mountId !== mountId || !alive.current) return;
-      if (event.releaseAddress) editingAddress.current = false;
-      const accepted = acceptState(event.state);
-      if (accepted && event.releaseAddress) {
-        const url = event.state.tabs.find((entry) => entry.id === event.state.activeTabId)?.url;
-        setAddress(url === "about:blank" ? "" : (url ?? ""));
-      }
-      if (accepted && event.focusAddress) {
-        addressInput.current?.focus();
-        addressInput.current?.select();
-      }
-    });
-    api
-      .attachBrowser({ mountId, target })
-      .then((next) => {
-        if (alive.current) acceptState(next);
-      })
-      .catch((reason: unknown) => {
-        if (alive.current) setError(String(reason));
-      });
-    return () => {
-      alive.current = false;
-      unsubscribe();
-      api.detachBrowser(mountId).catch(console.error);
-    };
-  }, [api, mountId, target.workspaceId, target.sessionId, acceptState]);
+  useLayoutEffect(() => {
+    if (event?.releaseAddress) {
+      editingAddress.current = false;
+      setAddress(tab?.url === "about:blank" ? "" : (tab?.url ?? ""));
+    }
+    if (event?.focusAddress) {
+      addressInput.current?.focus();
+      addressInput.current?.select();
+    }
+  }, [event]);
 
   useEffect(() => {
     const stopEditing = () => {
@@ -88,9 +57,6 @@ export function BrowserPanel({
       editingAddress.current = false;
     if (!editingAddress.current) setAddress(tab?.url === "about:blank" ? "" : (tab?.url ?? ""));
     shownTabId.current = tab?.id;
-    tabList.current
-      ?.querySelector('[aria-selected="true"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [tab?.id, tab?.url]);
 
   useEffect(() => {
@@ -119,7 +85,7 @@ export function BrowserPanel({
       if (serialized === previous) return;
       previous = serialized;
       api.layoutBrowser(layout).catch((reason: unknown) => {
-        if (alive.current) setError(String(reason));
+        console.error(reason);
       });
     };
     const schedule = () => {
@@ -145,25 +111,16 @@ export function BrowserPanel({
       window.removeEventListener("resize", schedule);
       window.removeEventListener("scroll", schedule, true);
       if (frame) cancelAnimationFrame(frame);
+      api
+        .layoutBrowser({
+          mountId,
+          visible: false,
+          focused: false,
+          bounds: { x: 0, y: 0, width: 0, height: 0 },
+        })
+        .catch(console.error);
     };
   }, [api, error, mountId, state !== null, tab?.id, tab?.url, tab?.error]);
-
-  const act = useCallback(
-    (action: Omit<BrowserAction, "mountId">) => {
-      const request = ++lastAction.current;
-      setError("");
-      api
-        .browserAction({ ...action, mountId })
-        .then((next) => {
-          if (alive.current) acceptState(next);
-        })
-        .catch((reason: unknown) => {
-          if (alive.current && request === lastAction.current)
-            setError(reason instanceof Error ? reason.message : String(reason));
-        });
-    },
-    [api, mountId, acceptState],
-  );
 
   return (
     <section
@@ -191,50 +148,6 @@ export function BrowserPanel({
         }
       }}
     >
-      <div className="browser-panel__tabs">
-        <div role="tablist" aria-label="Browser tabs" ref={tabList}>
-          {state?.tabs.map((entry) => (
-            <div
-              className={`browser-panel__tab${entry.id === state.activeTabId ? " browser-panel__tab--active" : ""}`}
-              key={entry.id}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={entry.id === state.activeTabId}
-                title={entry.url}
-                onClick={() => act({ kind: "select-tab", tabId: entry.id })}
-              >
-                {entry.loading ? (
-                  <span className="session-row__status session-row__status--running" />
-                ) : (
-                  <BrowserPreviewIcon />
-                )}
-                <span>{entry.title}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Close browser tab ${entry.title}`}
-                onClick={() => act({ kind: "close-tab", tabId: entry.id })}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="New browser tab"
-          disabled={!state}
-          onClick={() => {
-            act({ kind: "new-tab" });
-            addressInput.current?.focus();
-          }}
-        >
-          <PlusIcon />
-        </button>
-      </div>
       <form
         className="browser-panel__toolbar"
         onSubmit={(event) => {
@@ -281,7 +194,6 @@ export function BrowserPanel({
           onFocus={(event) => event.currentTarget.select()}
           onBlur={() => {
             editingAddress.current = false;
-            setAddress(tab?.url === "about:blank" ? "" : (tab?.url ?? ""));
           }}
           onChange={(event) => {
             editingAddress.current = true;
@@ -322,12 +234,4 @@ export function BrowserPanel({
       </div>
     </section>
   );
-}
-
-export function renderBrowserPanel(
-  api: PiDesktopApi | undefined,
-  target: WorkspaceSessionTarget | null,
-  key: string,
-) {
-  return api && target ? <BrowserPanel key={key} api={api} target={target} /> : null;
 }

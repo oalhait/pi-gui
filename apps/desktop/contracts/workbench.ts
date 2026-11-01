@@ -15,7 +15,8 @@ export function isBuiltinToolKind(value: unknown): value is BuiltinToolKind {
 }
 
 export type ToolRef =
-  | { readonly kind: BuiltinToolKind }
+  | { readonly kind: Exclude<BuiltinToolKind, "browser"> }
+  | { readonly kind: "browser"; readonly pageId?: string }
   | { readonly kind: "extension"; readonly extensionId: string; readonly viewId: string };
 
 export type ToolSelection =
@@ -53,7 +54,9 @@ export interface SaveTaskWorkbenchTemplateInput {
 export function toolRefId(tool: ToolRef): string {
   return tool.kind === "extension"
     ? JSON.stringify(["extension", tool.extensionId, tool.viewId])
-    : tool.kind;
+    : tool.kind === "browser" && tool.pageId
+      ? `browser:${tool.pageId}`
+      : tool.kind;
 }
 
 /** Shared by the disk reader and IPC boundary so neither can accept a wider schema. */

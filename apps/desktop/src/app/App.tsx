@@ -1,4 +1,3 @@
-import { renderBrowserPanel } from "../features/workbench/browser-panel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
 import {
@@ -226,7 +225,10 @@ export default function App() {
     flushComposerDraftAsync,
   } = useComposerDraftSync({ api, snapshot, selectedSession: workbenchTarget });
   const extensionViews = useExtensionViews({ api, target: workbenchTarget });
-  const workbench = useWorkbench({ api, target: workbenchTarget });
+  const workbench = useWorkbench({
+    api,
+    target: snapshot?.activeView === "threads" ? workbenchTarget : null,
+  });
   // Tracked while the panel is closed too, so a chord that opens it shows the hints.
   const sidePanelTabHintsVisible = useSidePanelTabHintsVisible(api?.platform ?? "linux");
   const workbenchTargetRef = useRef(workbenchTarget);
@@ -1340,7 +1342,7 @@ export default function App() {
         </>
         {sidePanelVisible && selectedWorkspace && selectedSession ? (
           <Workbench
-            view={workbench.view}
+            {...workbench.presentation}
             platform={api?.platform ?? "linux"}
             tabHintsVisible={sidePanelTabHintsVisible}
             onResize={workbenchWidth.setWidth}
@@ -1370,7 +1372,7 @@ export default function App() {
               />
             ) : activeTool && activeTool.kind !== "extension" ? (
               renderBuiltinToolPanel(activeTool.kind, {
-                browser: () => renderBrowserPanel(api, workbenchTarget, selectedSessionKey),
+                browser: () => workbench.browserPanel,
                 changes: () => (
                   <DiffPanel
                     key={selectedSessionKey}

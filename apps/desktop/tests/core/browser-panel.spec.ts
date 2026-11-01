@@ -74,7 +74,7 @@ async function nativeState(harness: DesktopHarness) {
   });
 }
 
-test("native browser navigates, isolates pages, keeps tabs per chat and restores logins", async () => {
+test("browser pages share the top-level tool row, isolate chats and restore logins", async () => {
   test.setTimeout(120_000);
   const userDataDir = await makeUserDataDir();
   const workspace = await makeWorkspace("native-browser");
@@ -86,6 +86,7 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
     const window = await first.firstWindow();
     await createNamedThread(window, "Browser Alpha");
     await openBrowser(window);
+    await expect(window.getByRole("tablist", { name: "Browser tabs" })).toHaveCount(0);
     const address = window.getByRole("textbox", { name: "Browser address" });
     await address.fill(`${base}/login`);
     await address.press("Enter");
@@ -110,13 +111,23 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
     await expect(address).toHaveValue(`${base}/login`);
     await window.getByRole("button", { name: "Browser forward", exact: true }).click();
     await expect(address).toHaveValue(`${base}/second`);
+    await window.getByRole("tab", { name: "Review", exact: true }).click();
+    await expect
+      .poll(async () => (await nativeState(first)).some((page) => page.visible))
+      .toBe(false);
+    await expect(window.getByRole("tab", { name: "Browser /second", exact: true })).toBeVisible();
+    await window.getByRole("tab", { name: "Browser /second", exact: true }).click();
+    await expect(address).toHaveValue(`${base}/second`);
     const secondPage = first.electronApp
       .context()
       .pages()
       .find((page) => page.url() === `${base}/second`)!;
     await secondPage.getByRole("link", { name: "Popup", exact: true }).click();
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(2);
     await expect(address).toHaveValue(`${base}/popup`);
     await expect
@@ -125,9 +136,7 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
           (await nativeState(first)).find((page) => page.url === `${base}/popup`)?.privileges,
       )
       .toEqual(["undefined", "undefined", "undefined"]);
-    await window
-      .getByRole("button", { name: "Close browser tab Browser /popup", exact: true })
-      .click();
+    await window.getByRole("button", { name: "Close Browser /popup tab", exact: true }).click();
     await address.focus();
     await first.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.sendInputEvent({
@@ -137,7 +146,10 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
       });
     });
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(2);
     await address.fill("file:///etc/passwd");
     await address.press("Enter");
@@ -145,7 +157,10 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
     await createNamedThread(window, "Browser Bravo");
     await openBrowser(window);
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(1);
     await expect(address).toHaveValue("");
     await address.fill(`${base}/bravo`);
@@ -157,7 +172,10 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
       .toEqual([`${base}/bravo`]);
     await selectSession(window, "Browser Alpha");
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(2);
     await window.getByRole("tab", { name: "Browser /second", exact: true }).click();
     await expect
@@ -202,17 +220,22 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
     const window = await second.firstWindow();
     await selectSession(window, "Browser Alpha");
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(2);
     await expect
       .poll(
         async () => (await nativeState(second)).find((page) => page.url === `${base}/second`)?.text,
       )
       .toContain("browser_login=present");
-    for (let index = 2; index < 32; index++)
-      await window.getByRole("button", { name: "New browser tab", exact: true }).click();
+    for (let index = 2; index < 32; index++) await openBrowser(window);
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(32);
     await window.getByRole("tab", { name: "Browser /second", exact: true }).click();
     await window.getByRole("textbox", { name: "Browser address" }).focus();
@@ -229,12 +252,12 @@ test("native browser navigates, isolates pages, keeps tabs per chat and restores
     await expect
       .poll(async () => (await nativeState(second)).some((page) => page.visible))
       .toBe(true);
-    await window
-      .getByRole("button", { name: "Close browser tab New tab", exact: true })
-      .last()
-      .click();
+    await window.getByRole("button", { name: "Close New tab tab", exact: true }).last().click();
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(31);
     await expect(
       window.getByText("Close a browser tab before opening another.", { exact: true }),
@@ -276,7 +299,7 @@ test("restoring a slow tab preserves its saved destination when another tab fini
     await expect(window.getByRole("textbox", { name: "Browser address" })).toHaveValue(
       `${base}/second`,
     );
-    await window.getByRole("button", { name: "New browser tab", exact: true }).click();
+    await openBrowser(window);
     await expect
       .poll(async () => {
         const saved = JSON.parse(await readFile(savedPath, "utf8")) as Record<
@@ -323,7 +346,10 @@ test("web pages cannot open privileged pages, access the app, or gain site permi
     ).toBe("denied");
     await page.getByRole("button", { name: "Blocked popup", exact: true }).click();
     await expect(
-      window.getByRole("tablist", { name: "Browser tabs" }).getByRole("tab"),
+      window
+        .getByRole("tablist", { name: "Workspace tools" })
+        .getByRole("tab")
+        .filter({ hasNotText: "Review" }),
     ).toHaveCount(1);
     await page.getByRole("link", { name: "Blocked file link", exact: true }).click();
     expect(page.frames().some((frame) => frame.url().startsWith("file:"))).toBe(false);
@@ -364,7 +390,8 @@ test("a delayed browser action response cannot replace newer tabs or a typed add
     const window = await harness.firstWindow();
     await createNamedThread(window, "Browser response order");
     await openBrowser(window);
-    const tabs = window.getByRole("tablist", { name: "Browser tabs" });
+    const tabs = window.getByRole("tablist", { name: "Workspace tools" });
+    await window.getByRole("button", { name: "Close Review tab", exact: true }).click();
     await expect(tabs.getByRole("tab")).toHaveCount(1);
     await harness.electronApp.evaluate(({ ipcMain }, channel) => {
       type Handler = (...args: unknown[]) => unknown;
@@ -400,7 +427,7 @@ test("a delayed browser action response cannot replace newer tabs or a typed add
         ),
       )
       .toBe(true);
-    await window.getByRole("button", { name: "New browser tab", exact: true }).click();
+    await openBrowser(window);
     await expect(tabs.getByRole("tab")).toHaveCount(2);
     const address = window.getByRole("textbox", { name: "Browser address" });
     await address.fill("A draft address");
@@ -412,6 +439,98 @@ test("a delayed browser action response cannot replace newer tabs or a typed add
     await getDesktopState(window);
     await expect(tabs.getByRole("tab")).toHaveCount(2);
     await expect(address).toHaveValue("A draft address");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("closing the last browser page leaves other tools intact and reopens a fresh page", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspace = await makeWorkspace("browser-last-page");
+  const harness = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Close browser pages");
+    await openBrowser(window);
+    await window.getByRole("textbox", { name: "Browser address" }).fill(`${base}/closing`);
+    await window.getByRole("button", { name: "Open address", exact: true }).click();
+    await expect(window.getByRole("tab", { name: "Browser /closing", exact: true })).toBeVisible();
+    await window.getByRole("button", { name: "Close Browser /closing tab", exact: true }).click();
+    await expect(
+      window.getByRole("tablist", { name: "Workspace tools" }).getByRole("tab"),
+    ).toHaveCount(1);
+    await expect(window.getByRole("tab", { name: "Review", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect.poll(() => nativeState(harness)).toEqual([]);
+    await openBrowser(window);
+    await expect(window.getByRole("textbox", { name: "Browser address" })).toHaveValue("");
+    await expect(window.getByRole("tablist", { name: "Browser tabs" })).toHaveCount(0);
+    await openBrowser(window);
+    const modifier = process.platform === "darwin" ? "Control" : "Alt";
+    await window.keyboard.press(`${modifier}+2`);
+    await expect(
+      window.getByRole("tablist", { name: "Workspace tools" }).getByRole("tab").nth(1),
+    ).toHaveAttribute("aria-selected", "true");
+    await window.getByRole("tab", { name: "Review", exact: true }).click();
+    await window.getByRole("button", { name: "Close New tab tab", exact: true }).last().click();
+    await expect(window.getByRole("tab", { name: "Review", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await window.keyboard.press(`${modifier}+2`);
+    await expect(window.getByRole("textbox", { name: "Browser address" })).toBeVisible();
+  } finally {
+    await harness.close();
+  }
+});
+
+test("closing browser and other tool tabs selects and focuses the same flat-row neighbor", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspace = await makeWorkspace("browser-neighbors");
+  const harness = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Browser neighbors");
+    await openBrowser(window);
+    const address = window.getByRole("textbox", { name: "Browser address" });
+    await address.fill(`${base}/neighbor`);
+    await window.getByRole("button", { name: "Open address", exact: true }).click();
+    const pageTab = window.getByRole("tab", { name: "Browser /neighbor", exact: true });
+    await expect(pageTab).toBeVisible();
+    await openBrowser(window);
+    await window.getByRole("button", { name: "Add tab", exact: true }).click();
+    await window.getByRole("button", { name: "Terminal", exact: true }).click();
+    await window.getByRole("tab", { name: "New tab", exact: true }).click();
+    await window.getByRole("button", { name: "Close New tab tab", exact: true }).click();
+    const terminal = window.getByRole("tab", { name: "Terminal", exact: true });
+    await expect(terminal).toHaveAttribute("aria-selected", "true");
+    await expect
+      .poll(() =>
+        window.evaluate(() => {
+          const focused = document.activeElement;
+          return (
+            focused?.getAttribute("data-testid") === "workbench-tab-terminal" ||
+            Boolean(focused?.closest('[data-testid="integrated-terminal"]'))
+          );
+        }),
+      )
+      .toBe(true);
+    await window.getByRole("button", { name: "Close Terminal tab", exact: true }).click();
+    await expect(pageTab).toHaveAttribute("aria-selected", "true");
+    await expect(pageTab).toBeFocused();
+    await openBrowser(window);
+    await window.getByRole("tab", { name: "Review", exact: true }).click();
+    await window.getByRole("button", { name: "Close Review tab", exact: true }).click();
+    await expect(pageTab).toHaveAttribute("aria-selected", "true");
+    await expect(pageTab).toBeFocused();
   } finally {
     await harness.close();
   }

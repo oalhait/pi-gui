@@ -121,6 +121,7 @@ test("adds singleton tool tabs, closes to a neighbor, and keeps an empty chooser
     agentDir: fixture.agentDir,
     initialWorkspaces: [fixture.workspacePath],
     testMode: "background",
+    envOverrides: process.platform === "win32" ? {} : { SHELL: "/bin/sh", ENV: "" },
   });
   try {
     const window = await harness.firstWindow();
@@ -417,6 +418,7 @@ test("closing the Terminal view preserves its live shell", async () => {
     agentDir: fixture.agentDir,
     initialWorkspaces: [fixture.workspacePath],
     testMode: "background",
+    envOverrides: process.platform === "win32" ? {} : { SHELL: "/bin/sh", ENV: "" },
   });
   try {
     const window = await harness.firstWindow();

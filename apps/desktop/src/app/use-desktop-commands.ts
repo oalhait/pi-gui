@@ -136,7 +136,11 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
   const openNewThread = () => input.openNewThread(selectedRootWorkspaceId);
   const toggleWorkbenchTool = (kind: BuiltinToolKind) => {
     if (!sidePanelAvailable) return;
-    if (sidePanelVisible && selectedToolId === kind) workbench.setVisibility("hidden");
+    if (
+      sidePanelVisible &&
+      (selectedToolId === kind || (kind === "browser" && selectedToolId?.startsWith("browser:")))
+    )
+      workbench.setVisibility("hidden");
     else workbench.openTool({ kind });
   };
   const toggleSidePanel = () => {

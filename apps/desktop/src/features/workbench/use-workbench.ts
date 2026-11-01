@@ -1,3 +1,4 @@
+import { useBrowserWorkbench } from "./use-browser-workbench";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import type { PiDesktopApi } from "../../../contracts/ipc";
@@ -34,7 +35,7 @@ function targetKey(target: SessionRef): string {
 }
 
 /** Each window owns this map. Host templates are read once, never subscribed to as live state. */
-export function useWorkbench({ api, target }: UseWorkbenchOptions) {
+function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
   const entries = useRef(new Map<string, WorkbenchEntry>());
   const pendingRestores = useRef(new Set<string>());
   const mounted = useRef(true);
@@ -264,4 +265,10 @@ export function useWorkbench({ api, target }: UseWorkbenchOptions) {
     openFile,
     retryRestore,
   };
+}
+
+export type WorkbenchLayout = ReturnType<typeof useWorkbenchLayout>;
+export function useWorkbench(options: UseWorkbenchOptions) {
+  const layout = useWorkbenchLayout(options);
+  return useBrowserWorkbench(options.api, options.target, layout);
 }

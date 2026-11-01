@@ -158,3 +158,33 @@ export function reduceWorkbench(
     }
   }
 }
+
+export function projectBrowserWorkbench(
+  view: TaskWorkbenchTemplate,
+  browser: import("../../../contracts/browser").BrowserPanelState | undefined,
+): TaskWorkbenchTemplate {
+  return {
+    ...view,
+    tools: view.tools.flatMap((tool): ToolRef[] =>
+      tool.kind === "browser" && browser?.tabs.length
+        ? browser.tabs.map((tab) => ({ kind: "browser", pageId: tab.id }))
+        : [tool],
+    ),
+    selection:
+      view.selection.kind === "tool" && view.selection.toolId === "browser" && browser?.activeTabId
+        ? { kind: "tool", toolId: `browser:${browser.activeTabId}` }
+        : view.selection,
+  };
+}
+
+export function workbenchCloseNeighbor(
+  view: TaskWorkbenchTemplate,
+  toolId: string,
+): string | undefined {
+  if (view.selection.kind !== "tool") return undefined;
+  if (view.selection.toolId !== toolId) return view.selection.toolId;
+  const index = view.tools.findIndex((tool) => toolRefId(tool) === toolId);
+  const tools = view.tools.filter((tool) => toolRefId(tool) !== toolId);
+  const neighbor = tools[Math.min(index, tools.length - 1)];
+  return neighbor ? toolRefId(neighbor) : undefined;
+}
