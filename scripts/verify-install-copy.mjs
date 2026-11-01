@@ -13,13 +13,12 @@ async function main() {
     readFile(path.join(repoRoot, "apps", "website", "app", "page.tsx"), "utf8"),
   ]);
 
-  assert.match(
-    readme,
-    /Download the latest `\.dmg` \(macOS\), `\.AppImage` or `\.deb` \(Linux\), or `\.exe` \(Windows\) from the\s+\[Releases page\]/,
-  );
-  assert.match(readme, /brew install --cask pi-gui/);
-  assert.match(readme, /brew upgrade --cask pi-gui/);
-  assert.doesNotMatch(readme, /Homebrew installation will be published/);
+  assert.match(readme, /macOS arm64 ZIP/);
+  assert.match(readme, /https:\/\/github.com\/oalhait\/pi-gui\/releases/);
+  assert.match(readme, /not Apple-notarized/);
+  assert.match(readme, /does not currently publish Linux or Windows binaries/);
+  assert.match(readme, /Homebrew cask install the upstream distribution/);
+  assert.doesNotMatch(readme, /Releases are signed and notarized/);
 
   assert.match(
     siteMetadata,
@@ -33,7 +32,7 @@ async function main() {
   assert.match(websitePage, /Building from source is for contributors/);
   assert.doesNotMatch(websitePage, /Run the beta from source/);
 
-  process.stdout.write("Install copy is aligned across README and website.\n");
+  process.stdout.write("Fork README and inherited upstream website install copy are valid.\n");
 }
 
 main().catch((error) => {

@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { BUILTIN_TOOL_KINDS, type BuiltinToolKind } from "../../../contracts/workbench";
-import { DiffIcon, FileIcon, TerminalIcon } from "../../ui/icons";
+import { DiffIcon, FileIcon, TerminalIcon, BrowserPreviewIcon } from "../../ui/icons";
 
 interface BuiltinToolDefinition {
   readonly label: string;
@@ -13,6 +13,11 @@ interface BuiltinToolDefinition {
 
 /** Presentation for every built-in tool; a missing kind fails the build. */
 export const BUILTIN_TOOLS = {
+  browser: {
+    label: "Browser",
+    description: "Browse websites and preview local apps",
+    Icon: BrowserPreviewIcon,
+  },
   files: { label: "Files", description: "Browse files in this checkout", Icon: FileIcon },
   changes: {
     label: "Review",

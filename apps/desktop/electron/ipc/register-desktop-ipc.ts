@@ -1,3 +1,4 @@
+import { registerBrowserRequests } from "./browser-requests";
 import { ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import type { SessionRef } from "@pi-gui/session-driver";
@@ -103,6 +104,7 @@ type ConversationOwner = Pick<
   | "archiveSession"
   | "unarchiveSession"
   | "markSessionRead"
+  | "markSessionUnread"
   | "setSessionPinned"
   | "createSession"
   | "startThread"
@@ -146,6 +148,7 @@ type SettingsOwner = Pick<
   | "setModelSettingsScopeMode"
   | "setDefaultModel"
   | "setDefaultThinkingLevel"
+  | "getProviderUsage"
   | "loginProvider"
   | "logoutProvider"
   | "setProviderApiKey"
@@ -239,6 +242,7 @@ export function registerDesktopIpc({
   capabilities,
 }: RegisterDesktopIpcOptions): void {
   const handleMainFrame = mainFrameHandler(windows);
+  registerBrowserRequests(handleMainFrame, windows);
   registerReviewRequests(handleMainFrame, owners.review);
   registerExtensionViewRequests(handleMainFrame, windows, owners.extensionViews);
   const workbench = new WorkbenchRequests(owners.workbench);
@@ -415,6 +419,11 @@ export function registerDesktopIpc({
     const target = expectSessionTarget(rawTarget);
     return run(event, () => owners.conversation.markSessionRead(target));
   });
+  handleMainFrame(desktopIpc.markSessionUnread, expectSessionTarget, (target, request) =>
+    windows.runImmediateStateAction(request.window, () =>
+      owners.conversation.markSessionUnread(target),
+    ),
+  );
   ipcMain.handle(desktopIpc.setSessionPinned, (event, rawTarget: unknown, rawPinned: unknown) => {
     const target = expectSessionTarget(rawTarget);
     const pinned = expectBoolean(rawPinned, "pinned");
@@ -502,6 +511,11 @@ export function registerDesktopIpc({
           expectThinkingLevel(thinkingLevel),
         ),
       ),
+  );
+  handleMainFrame(
+    desktopIpc.providerUsage,
+    (raw) => expectNonEmptyString(raw, "workspaceId"),
+    (workspaceId) => owners.settings.getProviderUsage(workspaceId),
   );
   ipcMain.handle(
     desktopIpc.loginProvider,

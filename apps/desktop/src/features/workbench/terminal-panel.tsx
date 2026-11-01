@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
@@ -30,6 +30,7 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
   const terminalRef = useRef<Terminal | null>(null);
   const activeTerminalIdRef = useRef("");
   const mountedRef = useRef(false);
+  const focusRequested = useRef(true);
   const lastSizeRef = useRef<TerminalSize>({ cols: 80, rows: 24 });
   const [panel, setPanel] = useState<TerminalPanelSnapshot | null>(null);
   const [error, setError] = useState<string>("");
@@ -137,7 +138,7 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
     });
   }, [api]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const panelElement = panelRef.current;
     if (!api || !panelElement) {
       return undefined;
@@ -155,9 +156,14 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
         setError(error instanceof Error ? error.message : String(error));
       });
     };
+    const trackFocusRequest = (event: FocusEvent) => {
+      focusRequested.current = event.target instanceof Node && panelElement.contains(event.target);
+    };
+    document.addEventListener("focusin", trackFocusRequest);
     panelElement.addEventListener("focusin", markFocused);
     panelElement.addEventListener("focusout", markBlurred);
     return () => {
+      document.removeEventListener("focusin", trackFocusRequest);
       panelElement.removeEventListener("focusin", markFocused);
       panelElement.removeEventListener("focusout", markBlurred);
       void api.setTerminalFocused(false).catch((error: unknown) => {
@@ -300,7 +306,7 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
     if (activeSession.replay) {
       terminal.write(activeSession.replay);
     }
-    terminal.focus();
+    if (focusRequested.current) terminal.focus();
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     window.requestAnimationFrame(fitAndResize);

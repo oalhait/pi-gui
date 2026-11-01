@@ -86,6 +86,7 @@ interface DesktopCommandsInput {
   readonly openSkills: (workspaceId?: string) => void;
   readonly openExtensions: (workspaceId?: string) => void;
   readonly setActiveView: (view: AppView) => void;
+  readonly navigate: (direction: -1 | 1) => void;
 }
 
 /**
@@ -135,7 +136,11 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
   const openNewThread = () => input.openNewThread(selectedRootWorkspaceId);
   const toggleWorkbenchTool = (kind: BuiltinToolKind) => {
     if (!sidePanelAvailable) return;
-    if (sidePanelVisible && selectedToolId === kind) workbench.setVisibility("hidden");
+    if (
+      sidePanelVisible &&
+      (selectedToolId === kind || (kind === "browser" && selectedToolId?.startsWith("browser:")))
+    )
+      workbench.setVisibility("hidden");
     else workbench.openTool({ kind });
   };
   const toggleSidePanel = () => {
@@ -222,6 +227,8 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
   };
 
   const handlers: Record<PiDesktopCommand, CommandHandler> = {
+    [desktopCommands.navigateBack]: () => input.navigate(-1),
+    [desktopCommands.navigateForward]: () => input.navigate(1),
     [desktopCommands.openSettings]: () => input.openSettings(selectedRootWorkspaceId),
     [desktopCommands.openNewThread]: openNewThread,
     [desktopCommands.toggleTerminal]: () => toggleWorkbenchTool("terminal"),
@@ -308,6 +315,8 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
         code: event.code,
       });
       if (
+        command === desktopCommands.navigateBack ||
+        command === desktopCommands.navigateForward ||
         command === desktopCommands.toggleTerminal ||
         command === desktopCommands.toggleSidePanel
       ) {

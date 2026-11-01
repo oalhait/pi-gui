@@ -1,3 +1,4 @@
+import type { BrowserTabState } from "../../../contracts/browser";
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 import {
   formatShortcut,
@@ -9,10 +10,11 @@ import type { DesktopExtensionViewInfo } from "../../../contracts/extension-view
 import { CloseIcon, ExtensionIcon, PlusIcon, SidePanelIcon } from "../../ui/icons";
 import { BUILTIN_TOOL_ENTRIES, BUILTIN_TOOLS } from "./builtin-tools";
 import { WorkbenchResizeHandle } from "./workbench-resize-handle";
-import { activeWorkbenchTool } from "./workbench-state";
+import { activeWorkbenchTool, workbenchCloseNeighbor } from "./workbench-state";
 
 interface WorkbenchProps {
   readonly view: TaskWorkbenchTemplate;
+  readonly browserTabs?: readonly BrowserTabState[];
   readonly platform: NodeJS.Platform;
   /** Whether the side panel tab modifier is held, so tabs show their numbers. */
   readonly tabHintsVisible: boolean;
@@ -44,6 +46,7 @@ function ToolIcon({ tool }: { readonly tool: ToolRef }) {
 
 export function Workbench({
   view,
+  browserTabs,
   platform,
   tabHintsVisible,
   onResize,
@@ -82,16 +85,7 @@ export function Workbench({
   const tabId = (toolId: string) => `${panelId}-${encodeURIComponent(toolId)}`;
 
   const closeAndFocus = (toolId: string) => {
-    const index = view.tools.findIndex((tool) => toolRefId(tool) === toolId);
-    const remaining = view.tools.filter((tool) => toolRefId(tool) !== toolId);
-    const neighbor = remaining[Math.min(index, remaining.length - 1)];
-    const active = view.selection;
-    const nextId =
-      active.kind === "tool" && active.toolId !== toolId
-        ? active.toolId
-        : neighbor
-          ? toolRefId(neighbor)
-          : undefined;
+    const nextId = workbenchCloseNeighbor(view, toolId);
     onCloseTool(toolId);
     window.requestAnimationFrame(() => {
       if (nextId) tabRefs.current.get(nextId)?.focus();
@@ -144,7 +138,9 @@ export function Workbench({
                 ? (extensionViews.find(
                     (entry) => entry.extensionId === tool.extensionId && entry.id === tool.viewId,
                   )?.title ?? workbenchToolLabel(tool))
-                : workbenchToolLabel(tool);
+                : tool.kind === "browser"
+                  ? (browserTabs?.find((tab) => tab.id === tool.pageId)?.title ?? "Browser")
+                  : workbenchToolLabel(tool);
             const selected = view.selection.kind === "tool" && view.selection.toolId === toolId;
             const slot = index < SIDE_PANEL_TAB_SHORTCUT_SLOT_COUNT ? index + 1 : undefined;
             const shortcut = slot ? getSidePanelTabShortcutLabel(platform, slot) : undefined;

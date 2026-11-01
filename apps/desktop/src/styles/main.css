@@ -3451,3 +3451,41 @@ mark.thread-find-active {
   border: 1px solid var(--border-default);
   color: var(--muted-soft);
 }
+
+.provider-usage__account {
+  padding: 16px 20px;
+}
+.provider-usage__account + .provider-usage__account {
+  border-top: 1px solid var(--border);
+}
+.provider-usage__heading,
+.provider-usage__line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.provider-usage__heading {
+  margin-bottom: 12px;
+}
+.provider-usage__plan {
+  text-transform: capitalize;
+}
+.provider-usage__window {
+  margin-bottom: 12px;
+}
+.provider-usage progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--text);
+}
+.provider-usage__line {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.provider-usage__note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}

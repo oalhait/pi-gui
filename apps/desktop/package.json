@@ -1,11 +1,11 @@
 {
   "name": "@pi-gui/desktop",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Matthew Lam",
   "license": "MIT",
   "description": "Codex-style desktop shell for pi",
-  "homepage": "https://github.com/minghinmatthewlam/pi-gui",
+  "homepage": "https://github.com/oalhait/pi-gui",
   "main": "out/main/main.js",
   "scripts": {
     "build:deps": "pnpm --dir ../.. --filter @pi-gui/session-driver --filter @pi-gui/pi-sdk-driver --filter @pi-gui/extension-ui --filter @pi-gui/catalogs run build",
@@ -174,7 +174,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "app-builder-bin": "5.0.0-alpha.12",
     "cross-env": "^7.0.3",
-    "electron": "37.10.3",
+    "electron": "43.8.6",
     "electron-builder": "26.8.1",
     "electron-vite": "^5.0.0",
     "playwright": "^1.58.2",

@@ -1,3 +1,4 @@
+import { routeBrowserChromeShortcut } from "./platform/browser-owner";
 import {
   app,
   BrowserWindow,
@@ -563,6 +564,8 @@ function createWindow(): BrowserWindow {
       return;
     }
 
+    if (routeBrowserChromeShortcut(window.webContents, event, input)) return;
+
     // Side panel tab chords act from the terminal and extension views too. The
     // key is not consumed: that would also swallow the modifier's keyup, leaving
     // the tab hints up, and on Windows and Linux it would let the Alt release
@@ -896,6 +899,25 @@ function installApplicationMenu(): void {
     {
       label: "View",
       submenu: [
+        {
+          label: "Back",
+          accelerator: "CommandOrControl+[",
+          click: () =>
+            BrowserWindow.getFocusedWindow()?.webContents.send(
+              desktopIpc.appCommand,
+              desktopCommands.navigateBack,
+            ),
+        },
+        {
+          label: "Forward",
+          accelerator: "CommandOrControl+]",
+          click: () =>
+            BrowserWindow.getFocusedWindow()?.webContents.send(
+              desktopIpc.appCommand,
+              desktopCommands.navigateForward,
+            ),
+        },
+        { type: "separator" },
         // Cmd+R toggles Review and Shift+Cmd+R renames the thread, so neither
         // reload has a shortcut.
         {

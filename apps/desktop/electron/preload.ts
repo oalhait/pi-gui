@@ -1,4 +1,12 @@
 import type {
+  BrowserAction,
+  BrowserLayout,
+  BrowserMount,
+  BrowserPanelState,
+  BrowserPanelEvent,
+} from "../contracts/browser";
+import type { ProviderUsage } from "@pi-gui/session-driver";
+import type {
   ExtensionViewOpenFile,
   DesktopExtensionViewInfo,
   OpenExtensionViewInput,
@@ -119,6 +127,16 @@ ipcRenderer.on(desktopIpc.appCommand, (_event, command: PiDesktopCommand) => {
 });
 
 contextBridge.exposeInMainWorld("piApp", {
+  attachBrowser: (input: BrowserMount) =>
+    ipcRenderer.invoke(desktopIpc.browserAttach, input) as Promise<BrowserPanelState>,
+  layoutBrowser: (input: BrowserLayout) =>
+    ipcRenderer.invoke(desktopIpc.browserLayout, input) as Promise<void>,
+  detachBrowser: (mountId: string) =>
+    ipcRenderer.invoke(desktopIpc.browserDetach, mountId) as Promise<void>,
+  browserAction: (input: BrowserAction) =>
+    ipcRenderer.invoke(desktopIpc.browserAction, input) as Promise<BrowserPanelState>,
+  onBrowserChanged: (listener: (event: BrowserPanelEvent) => void) =>
+    subscribeIpc(desktopIpc.browserChanged, listener),
   platform: process.platform,
   drawsWindowControls: process.argv.includes(drawWindowControlsArgument),
   versions: process.versions,
@@ -274,6 +292,8 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.invoke(desktopIpc.unarchiveSession, target) as Promise<DesktopAppState>,
   markSessionRead: (target: WorkspaceSessionTarget) =>
     ipcRenderer.invoke(desktopIpc.markSessionRead, target) as Promise<DesktopAppState>,
+  markSessionUnread: (target: WorkspaceSessionTarget) =>
+    ipcRenderer.invoke(desktopIpc.markSessionUnread, target) as Promise<DesktopAppState>,
   setSessionPinned: (target: WorkspaceSessionTarget, pinned: boolean) =>
     ipcRenderer.invoke(desktopIpc.setSessionPinned, target, pinned) as Promise<DesktopAppState>,
   createSession: (input: CreateSessionInput) =>
@@ -347,6 +367,8 @@ contextBridge.exposeInMainWorld("piApp", {
       sessionId,
       thinkingLevel,
     ) as Promise<DesktopAppState>,
+  getProviderUsage: (workspaceId: string) =>
+    ipcRenderer.invoke(desktopIpc.providerUsage, workspaceId) as Promise<readonly ProviderUsage[]>,
   loginProvider: (workspaceId: string, providerId: string) =>
     ipcRenderer.invoke(
       desktopIpc.loginProvider,

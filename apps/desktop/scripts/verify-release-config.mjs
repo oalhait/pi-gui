@@ -148,7 +148,7 @@ function validateBuilderConfig(config, desktopPackage, afterRemoveSource) {
   );
 
   assert(
-    desktopPackage.homepage === "https://github.com/minghinmatthewlam/pi-gui",
+    desktopPackage.homepage === "https://github.com/oalhait/pi-gui",
     "Desktop package metadata must provide the Debian Homepage",
   );
   assert(

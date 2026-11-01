@@ -1,4 +1,12 @@
 import type {
+  BrowserAction,
+  BrowserLayout,
+  BrowserMount,
+  BrowserPanelState,
+  BrowserPanelEvent,
+} from "./browser";
+import type { ProviderUsage } from "@pi-gui/session-driver";
+import type {
   ExtensionViewOpenFile,
   DesktopExtensionViewInfo,
   OpenExtensionViewInput,
@@ -108,6 +116,11 @@ export type NewMcpServerInput = { readonly name: string; readonly description?: 
 );
 
 export const desktopIpc = {
+  browserAttach: "pi-gui:browser-attach",
+  browserLayout: "pi-gui:browser-layout",
+  browserDetach: "pi-gui:browser-detach",
+  browserAction: "pi-gui:browser-action",
+  browserChanged: "pi-gui:browser-changed",
   extensionViewOpenFile: "pi-gui:extension-view-open-file",
   listExtensionViews: "pi-gui:list-extension-views",
   openExtensionView: "pi-gui:open-extension-view",
@@ -148,6 +161,7 @@ export const desktopIpc = {
   archiveSession: "pi-gui:archive-session",
   unarchiveSession: "pi-gui:unarchive-session",
   markSessionRead: "pi-gui:mark-session-read",
+  markSessionUnread: "pi-gui:mark-session-unread",
   setSessionPinned: "pi-gui:set-session-pinned",
   createSession: "pi-gui:create-session",
   startThread: "pi-gui:start-thread",
@@ -169,6 +183,7 @@ export const desktopIpc = {
   setDefaultThinkingLevel: "pi-gui:set-default-thinking-level",
   setSessionModel: "pi-gui:set-session-model",
   setSessionThinkingLevel: "pi-gui:set-session-thinking-level",
+  providerUsage: "pi-gui:provider-usage",
   loginProvider: "pi-gui:login-provider",
   logoutProvider: "pi-gui:logout-provider",
   setProviderApiKey: "pi-gui:set-provider-api-key",
@@ -247,6 +262,8 @@ export const desktopIpc = {
 } as const;
 
 export const desktopCommands = {
+  navigateBack: "navigate-back",
+  navigateForward: "navigate-forward",
   openSettings: "open-settings",
   openNewThread: "open-new-thread",
   toggleTerminal: "toggle-terminal",
@@ -615,6 +632,13 @@ export function getDesktopCommandFromShortcut(
     return undefined;
   }
 
+  if (!input.shift && (input.key === "[" || input.code === "BracketLeft")) {
+    return desktopCommands.navigateBack;
+  }
+  if (!input.shift && (input.key === "]" || input.code === "BracketRight")) {
+    return desktopCommands.navigateForward;
+  }
+
   if (!input.shift && isComma) {
     return desktopCommands.openSettings;
   }
@@ -686,6 +710,8 @@ export function isPaletteCommand(command: PiDesktopCommand | undefined): boolean
  */
 export function isSinglePressCommand(command: PiDesktopCommand | undefined): boolean {
   return (
+    command === desktopCommands.navigateBack ||
+    command === desktopCommands.navigateForward ||
     isPaletteCommand(command) ||
     command === desktopCommands.toggleReview ||
     command === desktopCommands.newSidePanelTab ||
@@ -721,6 +747,11 @@ export function isCloseFocusedSurfaceShortcut(input: {
 export const drawWindowControlsArgument = "--pi-draw-window-controls";
 
 export interface PiDesktopApi {
+  attachBrowser(input: BrowserMount): Promise<BrowserPanelState>;
+  layoutBrowser(input: BrowserLayout): Promise<void>;
+  detachBrowser(mountId: string): Promise<void>;
+  browserAction(input: BrowserAction): Promise<BrowserPanelState>;
+  onBrowserChanged(listener: (event: BrowserPanelEvent) => void): () => void;
   platform: NodeJS.Platform;
   /** True when the window has no native title bar and the app draws its own. */
   drawsWindowControls: boolean;
@@ -759,6 +790,7 @@ export interface PiDesktopApi {
   archiveSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   unarchiveSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   markSessionRead(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
+  markSessionUnread(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   setSessionPinned(target: WorkspaceSessionTarget, pinned: boolean): Promise<DesktopAppState>;
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;
   startThread(input: StartThreadInput): Promise<DesktopAppState>;
@@ -792,6 +824,7 @@ export interface PiDesktopApi {
     sessionId: string,
     thinkingLevel: NonNullable<RuntimeSettingsSnapshot["defaultThinkingLevel"]>,
   ): Promise<DesktopAppState>;
+  getProviderUsage(workspaceId: string): Promise<readonly ProviderUsage[]>;
   loginProvider(workspaceId: string, providerId: string): Promise<DesktopAppState>;
   logoutProvider(workspaceId: string, providerId: string): Promise<DesktopAppState>;
   setProviderApiKey(

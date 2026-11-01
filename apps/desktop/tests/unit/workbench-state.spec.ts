@@ -11,6 +11,8 @@ import {
   applyWorkbenchActions,
   initialWorkbenchView,
   reduceWorkbench,
+  projectBrowserWorkbench,
+  workbenchCloseNeighbor,
   restoreWorkbenchView,
 } from "../../src/features/workbench/workbench-state";
 
@@ -152,4 +154,38 @@ test("the file limit preserves existing references and reports blocked appends d
   ]);
   expect(existing.error).toBe("");
   expect(existing.view.files.tabs.tabs).toHaveLength(MAX_WORKBENCH_FILE_TABS);
+});
+
+test("browser pages project into the tool row without changing the saved placement", () => {
+  const saved = reduceWorkbench(initialWorkbenchView("checkout"), {
+    type: "open-tool",
+    tool: { kind: "browser" },
+  });
+  const browser = {
+    revision: 1,
+    activeTabId: "two",
+    tabs: ["one", "two"].map((id) => ({
+      id,
+      title: id,
+      url: "about:blank",
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+    })),
+  };
+  const visible = projectBrowserWorkbench(saved, browser);
+  expect(visible.tools.map(toolRefId)).toEqual(["changes", "browser:one", "browser:two"]);
+  expect(visible.selection).toEqual({ kind: "tool", toolId: "browser:two" });
+  expect(saved.tools.map(toolRefId)).toEqual(["changes", "browser"]);
+  expect(decodeTaskWorkbenchTemplate(saved)).toEqual(saved);
+  expect(workbenchCloseNeighbor(visible, "changes")).toBe("browser:two");
+  expect(workbenchCloseNeighbor(visible, "browser:two")).toBe("browser:one");
+  const terminal = { ...visible, tools: [...visible.tools, { kind: "terminal" as const }] };
+  expect(workbenchCloseNeighbor(terminal, "browser:two")).toBe("terminal");
+  expect(
+    workbenchCloseNeighbor(
+      { ...visible, selection: { kind: "tool", toolId: "changes" } },
+      "changes",
+    ),
+  ).toBe("browser:one");
 });

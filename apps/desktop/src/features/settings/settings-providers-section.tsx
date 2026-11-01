@@ -1,3 +1,4 @@
+import { ProviderUsageSection } from "./provider-usage-section";
 import { useTranslation } from "../../i18n";
 import { useEffect, useMemo, useState } from "react";
 import type { RuntimeProviderRecord, RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
@@ -8,6 +9,7 @@ import { filterProviders, ProviderRow, SettingsGroup } from "./settings-utils";
 
 interface SettingsProvidersSectionProps {
   readonly runtime?: RuntimeSnapshot;
+  readonly workspaceId?: string;
   readonly onLoginProvider: (providerId: string) => void;
   readonly onLogoutProvider: (providerId: string) => void;
   readonly onSetProviderApiKey: (providerId: string, apiKey: string) => Promise<string | undefined>;
@@ -27,6 +29,7 @@ function compareAvailableProviders(left: RuntimeProviderRecord, right: RuntimePr
 
 export function SettingsProvidersSection({
   runtime,
+  workspaceId,
   onLoginProvider,
   onLogoutProvider,
   onSetProviderApiKey,
@@ -146,6 +149,14 @@ export function SettingsProvidersSection({
           )}
         </div>
       </section>
+
+      {workspaceId && connectedProviders.length > 0 ? (
+        <ProviderUsageSection
+          key={workspaceId + connectedProviders.map((provider) => provider.id).join(",")}
+          workspaceId={workspaceId}
+          providers={connectedProviders}
+        />
+      ) : null}
 
       <SettingsCustomEndpointsSection
         existingProviderIds={existingProviderIds}
