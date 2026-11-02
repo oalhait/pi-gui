@@ -1,3 +1,4 @@
+import type { SessionTranscriptMessage } from "@pi-gui/session-driver";
 import {
   memo,
   useCallback,
@@ -47,6 +48,7 @@ interface ConversationTimelineProps {
   readonly threadSearch: ThreadSearchModel;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
+  readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
   readonly onForkFromMessage?: (messageIndex: number, preview?: string) => void;
   readonly onOpenWorkspaceFileLine?: (target: WorkspaceFileLine) => void;
   readonly onExtensionAction?: RunExtensionAction;
@@ -68,6 +70,7 @@ export function ConversationTimeline({
   onViewFileInDiff,
   onOpenTurnChange,
   onForkFromMessage,
+  onEditFromMessage,
   onOpenWorkspaceFileLine,
   onExtensionAction,
   extensionToolLabels,
@@ -179,6 +182,7 @@ export function ConversationTimeline({
                     onOpenTurnChange={onOpenTurnChange}
                     sourceMessageIndex={renderedMessageIndexById.get(item.id)}
                     onForkFromMessage={onForkFromMessage}
+                    onEditFromMessage={onEditFromMessage}
                     onOpenWorkspaceFileLine={onOpenWorkspaceFileLine}
                     onExtensionAction={onExtensionAction}
                     workspacePath={workspacePath}
@@ -289,6 +293,7 @@ interface MeasuredTimelineItemProps {
   readonly onViewFileInDiff?: (path: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
   readonly sourceMessageIndex?: number;
+  readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
   readonly onForkFromMessage?: (messageIndex: number, preview?: string) => void;
   readonly onOpenWorkspaceFileLine?: (target: WorkspaceFileLine) => void;
   readonly onExtensionAction?: RunExtensionAction;
@@ -311,6 +316,7 @@ function MeasuredTimelineItemBase({
   onOpenTurnChange,
   sourceMessageIndex,
   onForkFromMessage,
+  onEditFromMessage,
   onOpenWorkspaceFileLine,
   onExtensionAction,
   scheduledOrigin,
@@ -359,6 +365,7 @@ function MeasuredTimelineItemBase({
           onOpenTurnChange={onOpenTurnChange}
           sourceMessageIndex={sourceMessageIndex}
           onForkFromMessage={onForkFromMessage}
+          onEditFromMessage={onEditFromMessage}
           onOpenWorkspaceFileLine={onOpenWorkspaceFileLine}
           onExtensionAction={onExtensionAction}
           scheduledOrigin={scheduledOrigin}
@@ -450,6 +457,7 @@ function areMeasuredTimelineItemPropsEqual(
     prev.onOpenTurnChange === next.onOpenTurnChange &&
     prev.sourceMessageIndex === next.sourceMessageIndex &&
     prev.onForkFromMessage === next.onForkFromMessage &&
+    prev.onEditFromMessage === next.onEditFromMessage &&
     prev.onOpenWorkspaceFileLine === next.onOpenWorkspaceFileLine &&
     prev.onExtensionAction === next.onExtensionAction &&
     prev.workspacePath === next.workspacePath &&

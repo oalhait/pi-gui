@@ -96,7 +96,6 @@ import { useComposerDraftSync } from "../features/conversation/hooks/use-compose
 import { useSessionComposer } from "../features/conversation/hooks/use-session-composer";
 import { useTranscriptAnnotations } from "../features/conversation/annotations/use-transcript-annotations";
 import { SidebarDrawerBackdrop, useNarrowSidebarDrawer } from "../features/threads/sidebar-drawer";
-
 export default function App() {
   const desktop = useDesktopAppState();
   const workbenchWidth = useWorkbenchWidth();
@@ -117,7 +116,6 @@ export default function App() {
   } | null>(null);
   const [scheduledEditor, setScheduledEditor] = useState<ScheduledEditorState | null>(null);
   const api = window.piApp;
-
   useEffect(() => {
     const piApi = window.piApp;
     if (!piApi) return;
@@ -487,6 +485,7 @@ export default function App() {
     navigateTreeSelection,
     closeForkModal,
     openForkModal,
+    editFromMessage,
     handleForkSubmit,
     canUseWorktree,
   } = useTreeForkModals({
@@ -1187,6 +1186,7 @@ export default function App() {
                     onExtensionAction={runExtensionCardAction}
                     extensionToolLabels={extensionToolLabels}
                     workspacePath={selectedWorkspace.path}
+                    onEditFromMessage={editFromMessage}
                     onForkFromMessage={
                       selectedSession.status === "running" ? undefined : openForkModal
                     }

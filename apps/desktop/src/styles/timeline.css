@@ -1143,3 +1143,21 @@
 .timeline-tool__image img {
   object-fit: contain;
 }
+
+.timeline-item__actions--user {
+  justify-content: flex-end;
+  margin-left: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.timeline-item__actions--user time {
+  margin-right: 8px;
+}
+
+@media (hover: none) {
+  .timeline-item__actions--user {
+    opacity: 1;
+    transform: none;
+  }
+}

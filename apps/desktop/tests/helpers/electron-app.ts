@@ -992,6 +992,7 @@ export async function seedToolResultTreeSessionFixture(
 export async function seedForkSessionFixture(
   agentDir: string,
   workspacePath: string,
+  userImage?: { readonly data: string; readonly mimeType: string },
 ): Promise<{
   readonly sessionId: string;
   readonly title: "Fork fixture session";
@@ -1001,7 +1002,11 @@ export async function seedForkSessionFixture(
       create(cwd: string): {
         appendMessage(message: {
           role: "user" | "assistant";
-          content: string;
+          content:
+            | string
+            | (
+                { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+              )[];
           timestamp: number;
         }): string;
         appendModelChange(provider: string, modelId: string): string;
@@ -1020,7 +1025,16 @@ export async function seedForkSessionFixture(
       return timestamp;
     };
     const appendUser = (content: string) =>
-      sessionManager.appendMessage({ role: "user", content, timestamp: nextTimestamp() });
+      sessionManager.appendMessage({
+        role: "user",
+        content: userImage
+          ? [
+              { type: "text", text: content },
+              { type: "image", ...userImage },
+            ]
+          : content,
+        timestamp: nextTimestamp(),
+      });
     const appendAssistant = (content: string) =>
       sessionManager.appendMessage({ role: "assistant", content, timestamp: nextTimestamp() });
 
