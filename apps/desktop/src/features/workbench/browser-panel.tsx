@@ -67,6 +67,13 @@ export function BrowserPanel({
     const update = () => {
       frame = 0;
       const rect = element.getBoundingClientRect();
+      // The native page view paints above the DOM, so keep it clear of the workbench resize
+      // handle; otherwise the handle only receives the pointer above the page.
+      const handle = element
+        .closest(".workbench")
+        ?.querySelector(".workbench__resize-handle")
+        ?.getBoundingClientRect();
+      const left = handle ? Math.min(rect.right, Math.max(rect.left, handle.right)) : rect.left;
       const overlay = document.querySelector(
         '[role="dialog"], [role="menu"], [aria-modal="true"], .sidebar-drawer-backdrop',
       );
@@ -77,9 +84,9 @@ export function BrowserPanel({
           !overlay &&
           !tab?.error &&
           tab?.url !== "about:blank" &&
-          rect.width > 0 &&
+          rect.right - left > 0 &&
           rect.height > 0,
-        bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        bounds: { x: left, y: rect.y, width: rect.right - left, height: rect.height },
       };
       const serialized = JSON.stringify(layout);
       if (serialized === previous) return;

@@ -535,3 +535,56 @@ test("closing browser and other tool tabs selects and focuses the same flat-row 
     await harness.close();
   }
 });
+
+test("the native page leaves the side panel resize handle reachable along its full height", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspace = await makeWorkspace("browser-resize-handle");
+  const harness = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Browser resize handle");
+    await openBrowser(window);
+    await window.getByRole("textbox", { name: "Browser address" }).fill(`${base}/resize`);
+    await window.getByRole("button", { name: "Open address", exact: true }).click();
+    await expect(window.getByRole("tab", { name: "Browser /resize", exact: true })).toBeVisible();
+    const handle = window.getByRole("separator", { name: "Side panel width" });
+    const pageBounds = () =>
+      harness.electronApp.evaluate(({ BrowserWindow, webContents }) => {
+        const page = webContents
+          .getAllWebContents()
+          .find((contents) => contents.getURL().endsWith("/resize"));
+        for (const owner of BrowserWindow.getAllWindows())
+          for (const view of owner.contentView.children)
+            if ("webContents" in view && view.webContents === page && view.getVisible())
+              return view.getBounds();
+        return null;
+      });
+    // The native page paints above the DOM, so any overlap would swallow the handle's pointer.
+    const expectClearOfHandle = async () => {
+      await expect
+        .poll(async () => {
+          const box = await handle.boundingBox();
+          const bounds = await pageBounds();
+          return Boolean(box && bounds && bounds.width > 0 && bounds.x >= box.x + box.width);
+        })
+        .toBe(true);
+    };
+    await expectClearOfHandle();
+
+    const box = (await handle.boundingBox())!;
+    const startWidth = (await window.getByTestId("workbench").boundingBox())!.width;
+    await window.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+    await window.mouse.down();
+    await window.mouse.move(box.x - 60, box.y + box.height * 0.75, { steps: 4 });
+    await window.mouse.up();
+    await expect
+      .poll(async () => (await window.getByTestId("workbench").boundingBox())!.width)
+      .toBeGreaterThan(startWidth + 40);
+    await expectClearOfHandle();
+  } finally {
+    await harness.close();
+  }
+});
