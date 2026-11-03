@@ -60,6 +60,7 @@ export class SessionStateMap {
   readonly sessionSubscriptions = new Map<string, () => void>();
   readonly activeAssistantMessageBySession = new Map<string, string>();
   readonly pendingAssistantMessageBySession = new Map<string, string>();
+  readonly unpersistedUserMessagesBySession = new Map<string, string[]>();
   readonly runningSinceBySession = new Map<string, string>();
   readonly runMetricsBySession = new Map<string, RunMetrics>();
   readonly sessionCommandsBySession = new Map<string, RuntimeCommandRecord[]>();
@@ -107,6 +108,7 @@ export class SessionStateMap {
       this.sessionSubscriptions,
       this.activeAssistantMessageBySession,
       this.pendingAssistantMessageBySession,
+      this.unpersistedUserMessagesBySession,
       this.runningSinceBySession,
       this.runMetricsBySession,
       this.sessionCommandsBySession,
@@ -160,6 +162,7 @@ export class SessionStateMap {
     this.sessionSubscriptions.delete(key);
     this.activeAssistantMessageBySession.delete(key);
     this.pendingAssistantMessageBySession.delete(key);
+    this.unpersistedUserMessagesBySession.delete(key);
     this.runningSinceBySession.delete(key);
     this.runMetricsBySession.delete(key);
     this.composerDraftsBySession.delete(key);

@@ -23,6 +23,7 @@ import {
 import {
   appendQueuedUserMessage,
   appendUserMessage,
+  trackUnpersistedUserMessage,
   clearActiveAssistantMessage,
 } from "./app-store-timeline";
 import {
@@ -47,6 +48,7 @@ type ConversationMutableState = Pick<
   | "sessionConfigBySession"
   | "sessionErrorsBySession"
   | "transcriptCache"
+  | "unpersistedUserMessagesBySession"
 >;
 
 type ConversationDriver = Pick<
@@ -436,6 +438,11 @@ async function steerQueuedComposerMessage(
       sessionRef,
       optimisticSteerMessage,
     );
+    trackUnpersistedUserMessage(
+      store.conversationState.unpersistedUserMessagesBySession,
+      sessionRef,
+      optimisticSteerMessage.id,
+    );
     store.publishSelectedTranscriptFor(sessionRef);
   }
 
@@ -565,6 +572,11 @@ async function submitComposerToSession(
           store.conversationState.transcriptCache,
           sessionRef,
           optimisticSteerMessage,
+        );
+        trackUnpersistedUserMessage(
+          store.conversationState.unpersistedUserMessagesBySession,
+          sessionRef,
+          optimisticSteerMessage.id,
         );
         store.publishSelectedTranscriptFor(sessionRef);
       }
@@ -773,6 +785,11 @@ async function deliverBackgroundInstruction(
     sessionRef,
     instruction,
   );
+  trackUnpersistedUserMessage(
+    store.conversationState.unpersistedUserMessagesBySession,
+    sessionRef,
+    optimisticMessageId,
+  );
   store.publishSelectedTranscriptFor(sessionRef);
   clearActiveAssistantMessage(store.conversationState.activeAssistantMessageBySession, sessionRef);
   store.conversationState.sessionErrorsBySession.delete(key);
@@ -819,6 +836,11 @@ async function sendMessageToSession(
     sessionRef,
     text,
     toTranscriptAttachments(attachments),
+  );
+  trackUnpersistedUserMessage(
+    store.conversationState.unpersistedUserMessagesBySession,
+    sessionRef,
+    optimisticMessageId,
   );
   store.publishSelectedTranscriptFor(sessionRef);
   clearActiveAssistantMessage(store.conversationState.activeAssistantMessageBySession, sessionRef);

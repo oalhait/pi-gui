@@ -624,6 +624,11 @@ contextBridge.exposeInMainWorld("piApp", {
       readonly state: DesktopAppState;
       readonly result: NavigateSessionTreeResult;
     }>,
+  rewindToMessage: (target: WorkspaceSessionTarget, sourceMessageId: string) =>
+    ipcRenderer.invoke(desktopIpc.rewindToMessage, target, sourceMessageId) as Promise<{
+      readonly state: DesktopAppState;
+      readonly result: NavigateSessionTreeResult;
+    }>,
   listWorkspaceFiles: (workspaceId: string, options?: { readonly force?: boolean }) =>
     ipcRenderer.invoke(desktopIpc.listWorkspaceFiles, workspaceId, options) as Promise<string[]>,
   readWorkspaceFile: (workspaceId: string, filePath: string) =>

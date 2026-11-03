@@ -240,6 +240,7 @@ export const desktopIpc = {
   submitComposer: "pi-gui:submit-composer",
   getSessionTree: "pi-gui:get-session-tree",
   navigateSessionTree: "pi-gui:navigate-session-tree",
+  rewindToMessage: "pi-gui:rewind-to-message",
   toggleWindowMaximize: "pi-gui:toggle-window-maximize",
   minimizeWindow: "pi-gui:minimize-window",
   closeWindow: "pi-gui:close-window",
@@ -944,6 +945,11 @@ export interface PiDesktopApi {
     target: WorkspaceSessionTarget,
     targetId: string,
     options?: NavigateSessionTreeOptions,
+  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
+  /** Rewinds the thread to just before a sent user message so it can be edited and rerun. */
+  rewindToMessage(
+    target: WorkspaceSessionTarget,
+    sourceMessageId: string,
   ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
   listWorkspaceFiles(
     workspaceId: string,

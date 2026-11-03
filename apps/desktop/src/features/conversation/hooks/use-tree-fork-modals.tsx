@@ -86,20 +86,17 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
       )
         return;
       editingMessage.current = true;
+      // Rewind in place, as pi's /tree does for a user entry: the thread moves to just before
+      // the message, its text returns to the composer, and later turns stay in /tree.
       void api
-        .forkThread({
-          sourceWorkspaceId: selectedWorkspace.id,
-          sourceSessionId: selectedSession.id,
-          rootWorkspaceId:
-            resolveRepoWorkspaceId(snapshot?.workspaces ?? [], selectedWorkspace.id) ??
-            selectedWorkspace.id,
-          environment: "local",
-          sourceMessageId: message.sourceMessageId ?? message.id,
-          position: "before",
-        })
-        .then(async (state) => {
+        .rewindToMessage(
+          { workspaceId: selectedWorkspace.id, sessionId: selectedSession.id },
+          message.sourceMessageId ?? message.id,
+        )
+        .then(async ({ state, result }) => {
           applySnapshotIfNewer(setSnapshot, state);
-          if (state.lastError) return;
+          if (result.cancelled || result.aborted) return;
+          setComposerDraft(result.editorText ?? "");
           if (message.attachments?.length) {
             const attachments = message.attachments.map((attachment) => ({
               ...attachment,
@@ -121,7 +118,7 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
           editingMessage.current = false;
         });
     },
-    [api, selectedWorkspace, selectedSession, snapshot, setSnapshot, focusComposer],
+    [api, selectedWorkspace, selectedSession, setSnapshot, setComposerDraft, focusComposer],
   );
 
   const closeTreeModal = useCallback(() => {

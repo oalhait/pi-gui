@@ -403,18 +403,37 @@ export class SessionSupervisor {
             hidden: true,
             factory: createTranscriptIdentityExtension({
               workspace,
-              onPersisted: (sessionRef, sourceMessageId) => {
+              onPersisted: (sessionRef, { userEntryIds, assistantEntryId }) => {
                 const record = this.records.get(sessionKey(sessionRef));
-                if (!record) return;
+                if (!record?.session) return;
+                const timestamp = nowIso();
+                const runId = record.runningRunId ? { runId: record.runningRunId } : {};
+                const sessionManager = record.session.sessionManager;
+                const users = userEntryIds.flatMap((id): SessionDriverEvent[] => {
+                  const entry = sessionManager.getEntry(id);
+                  if (entry?.type !== "message") return [];
+                  const text = messageText(entry.message as unknown as Record<string, unknown>);
+                  return [
+                    {
+                      type: "userMessagePersisted",
+                      sessionRef,
+                      timestamp,
+                      sourceMessageId: id,
+                      text,
+                      ...runId,
+                    },
+                  ];
+                });
                 this.queueDriverEvents(
                   record,
                   [
+                    ...users,
                     {
                       type: "assistantMessagePersisted",
                       sessionRef,
-                      timestamp: nowIso(),
-                      sourceMessageId,
-                      ...(record.runningRunId ? { runId: record.runningRunId } : {}),
+                      timestamp,
+                      sourceMessageId: assistantEntryId,
+                      ...runId,
                     },
                   ],
                   { persistSnapshot: false },
@@ -1663,6 +1682,10 @@ export class SessionSupervisor {
       };
     }
 
+    // pi moves the leaf in memory only, so the file still ends on the old branch. Re-baseline
+    // the disk tail so getTranscript serves the navigated session rather than re-reading the
+    // file, whose mtime may have grown from this runtime's own earlier turns.
+    record.transcriptDiskMtimeMs = await this.statMtimeMs(record.sessionFile);
     record.updatedAt = nowIso();
     await this.syncRecordAfterSessionMutation(record, { emitUpdate: true });
     return {
@@ -1670,6 +1693,24 @@ export class SessionSupervisor {
       ...(result.editorText ? { editorText: result.editorText } : {}),
       ...(result.summaryEntry ? { summaryCreated: true } : {}),
     };
+  }
+
+  async rewindToUserMessage(
+    sessionRef: SessionRef,
+    sourceMessageId: string,
+  ): Promise<NavigateSessionTreeResult> {
+    const record = await this.ensureRecord(sessionRef);
+    const entry = this.requireSession(record)
+      .sessionManager.getBranch()
+      .find((candidate) => candidate.id === sourceMessageId);
+    if (entry?.type !== "message" || entry.message.role !== "user") {
+      throw new Error(
+        `Cannot edit a message in session ${sessionKey(sessionRef)}: no user message ${sourceMessageId}.`,
+      );
+    }
+    // pi's /tree semantics: selecting a user entry moves the leaf to its parent and returns
+    // the text for editing, so the next prompt starts a sibling branch.
+    return this.navigateSessionTree(sessionRef, entry.id);
   }
 
   subscribe(sessionRef: SessionRef, listener: SessionEventListener): Unsubscribe {

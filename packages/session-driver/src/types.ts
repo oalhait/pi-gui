@@ -217,6 +217,16 @@ export interface AssistantMessagePersistedEvent extends SessionEventBase {
 }
 
 /**
+ * Identifies a user message after Pi persists it, in the order Pi persisted them. `text` is
+ * the persisted text, which differs from what was sent when Pi expanded a skill or template.
+ */
+export interface UserMessagePersistedEvent extends SessionEventBase {
+  readonly type: "userMessagePersisted";
+  readonly sourceMessageId: string;
+  readonly text: string;
+}
+
+/**
  * A persisted transcript item that arrives outside the assistant stream: an extension's custom
  * message, card or pin. `item.id` matches the item a later reload projects.
  */
@@ -380,6 +390,7 @@ export type SessionDriverEvent =
   | AssistantDeltaEvent
   | AssistantMessageEndedEvent
   | AssistantMessagePersistedEvent
+  | UserMessagePersistedEvent
   | TranscriptItemAppendedEvent
   | QueuedMessageStartedEvent
   | ToolStartedEvent
@@ -417,6 +428,14 @@ export interface SessionDriver {
     sessionRef: SessionRef,
     targetId: string,
     options?: NavigateSessionTreeOptions,
+  ): Promise<NavigateSessionTreeResult>;
+  /**
+   * Rewinds to just before a user message, as pi's /tree does when a user message is selected:
+   * the leaf moves to its parent and the message text returns as `editorText`.
+   */
+  rewindToUserMessage(
+    sessionRef: SessionRef,
+    sourceMessageId: string,
   ): Promise<NavigateSessionTreeResult>;
   getSessionCommands(
     sessionRef: SessionRef,

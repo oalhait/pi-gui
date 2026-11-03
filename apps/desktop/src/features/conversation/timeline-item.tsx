@@ -247,7 +247,7 @@ function TimelineMessage({
               aria-label="Edit message"
               title={
                 onEditFromMessage
-                  ? "Edit message and continue in a new thread"
+                  ? "Edit this message and rerun the thread from here"
                   : "Editing is available when the run finishes"
               }
               disabled={!onEditFromMessage}

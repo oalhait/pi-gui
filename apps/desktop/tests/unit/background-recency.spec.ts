@@ -14,6 +14,7 @@ function deliveryHost(status: "idle" | "running") {
       transcriptCache,
       activeAssistantMessageBySession: new Map<string, string>(),
       sessionErrorsBySession: new Map<string, string>(),
+      unpersistedUserMessagesBySession: new Map<string, string[]>(),
     },
     driver: {
       sendUserMessage: async (_ref: SessionRef, message: { text: string }) => {

@@ -138,6 +138,13 @@ export class PiSdkDriver implements SessionDriver {
     return this.supervisor.navigateSessionTree(sessionRef, targetId, options);
   }
 
+  rewindToUserMessage(
+    sessionRef: SessionRef,
+    sourceMessageId: string,
+  ): Promise<NavigateSessionTreeResult> {
+    return this.supervisor.rewindToUserMessage(sessionRef, sourceMessageId);
+  }
+
   getSessionCommands(sessionRef: SessionRef) {
     return this.supervisor.getSessionCommands(sessionRef);
   }

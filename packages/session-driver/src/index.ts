@@ -2,6 +2,7 @@ export type {
   AssistantDeltaEvent,
   AssistantMessageEndedEvent,
   AssistantMessagePersistedEvent,
+  UserMessagePersistedEvent,
   TranscriptItemAppendedEvent,
   CreateSessionOptions,
   ExtensionFlagValues,

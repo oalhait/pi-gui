@@ -123,6 +123,7 @@ type ConversationOwner = Pick<
   | "reportExtensionActionFailure"
   | "getSessionTree"
   | "navigateSessionTree"
+  | "rewindToMessage"
   | "respondToHostUiRequest"
   | "setSessionModel"
   | "setSessionThinkingLevel"
@@ -986,6 +987,14 @@ export function registerDesktopIpc({
       );
     },
   );
+  ipcMain.handle(desktopIpc.rewindToMessage, (event, rawTarget: unknown, rawId: unknown) => {
+    const window = senderWindow(windows, event);
+    const target = expectSessionTarget(rawTarget);
+    const sourceMessageId = expectNonEmptyString(rawId, "sourceMessageId");
+    return windows.runStateResultAction(window, () =>
+      owners.conversation.rewindToMessage(target, sourceMessageId),
+    );
+  });
 
   registerWorkspaceFileIpc(windows, owners.workspace, capabilities);
   ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {

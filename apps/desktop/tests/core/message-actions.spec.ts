@@ -14,7 +14,7 @@ import {
 } from "../helpers/electron-app";
 
 for (const question of ["First fork question", "Second fork question"]) {
-  test(`edits ${question} from its original context while preserving the source chat`, async ({}, testInfo) => {
+  test(`edits ${question} by rewinding the thread to just before it`, async ({}, testInfo) => {
     const userDataDir = await makeUserDataDir();
     const agentDir = join(userDataDir, "agent");
     const workspacePath = await makeWorkspace("message-actions");
@@ -61,11 +61,9 @@ for (const question of ["First fork question", "Second fork question"]) {
       await window.mouse.move(0, 0);
       await expect(actions).toHaveCSS("opacity", "1");
       await message.getByRole("button", { name: "Edit message", exact: true }).press("Enter");
-      await expect
-        .poll(async () => (await getDesktopState(window)).selectedSessionId)
-        .not.toBe(original);
       await expect(window.getByTestId("composer")).toHaveValue(question);
       await expect(window.getByTestId("composer")).toBeFocused();
+      expect((await getDesktopState(window)).selectedSessionId).toBe(original);
       if (userImage) {
         await expect
           .poll(async () =>
@@ -73,7 +71,6 @@ for (const question of ["First fork question", "Second fork question"]) {
           )
           .toEqual(["image"]);
       }
-      const branch = (await getDesktopState(window)).selectedSessionId;
       await expect(transcript).not.toContainText(question);
       await expect(transcript).not.toContainText("Second fork answer");
       await expect(transcript).not.toContainText("Third fork question");
@@ -82,12 +79,12 @@ for (const question of ["First fork question", "Second fork question"]) {
       } else {
         await expect(transcript.locator(".timeline-item--user")).toHaveCount(0);
       }
-      await window.getByTestId("composer").fill("Edited question");
-      await window.locator(`[data-session-id="${original}"] .session-row__select`).click();
-      await expect(transcript).toContainText("Third fork answer");
-      await expect(transcript).toContainText(question);
-      await window.locator(`[data-session-id="${branch}"] .session-row__select`).click();
-      await expect(window.getByTestId("composer")).toHaveValue("Edited question");
+      await expect(window.getByTestId("composer-error-banner")).toHaveCount(0);
+      // The later turns stay in the session file as another branch, reachable from /tree.
+      await window.getByTestId("composer").fill("/tree");
+      await window.getByTestId("composer").press("Enter");
+      await expect(window.getByTestId("tree-modal")).toContainText("Third fork answer");
+      await window.getByRole("button", { name: "Close tree modal" }).click();
     } finally {
       await harness.close();
     }
