@@ -92,12 +92,15 @@ export class WorkbenchAgentOwner {
       if (!window.isDestroyed() && !window.webContents.isDestroyed())
         window.webContents.send(desktopIpc.workbenchAgentCancel, id);
     }
-    if (command.action !== "capture") return { state: reply.state };
+    if (command.action !== "capture" && command.action !== "read") return { state: reply.state };
     if (!reply.capture || !this.capturer) throw new Error("Side pane capture is unavailable.");
     if (signal?.aborted) throw new Error("Workbench action cancelled.");
     if (!this.matches(window, target))
-      throw new Error("The selected chat changed before the side pane was captured.");
-    return { state: reply.state, capture: await this.capturer(window, target, reply.capture) };
+      throw new Error("The selected chat changed before the side pane was read.");
+    return {
+      state: reply.state,
+      capture: await this.capturer(window, target, reply.capture, command),
+    };
   }
   register(handle: MainFrameHandler): void {
     handle(desktopIpc.workbenchAgentResponse, decodeWorkbenchAgentResponse, (input, request) => {
@@ -131,13 +134,14 @@ export function createWorkbenchAgentTool(
     // Always declared to the model from session start; never left for tool_search to load.
     exposure: "direct",
     description:
-      "Control and see this chat's pi-gui side pane (sidebar, browser view) directly: list tabs; show/hide the pane; open Browser, Files, Review, Terminal or extension tabs; select/close exact tab IDs; navigate/back/forward/reload/stop browser pages; capture a screenshot of the browser page or side pane tab the user is looking at. No macOS desktop permissions are needed.",
+      "Control and see this chat's pi-gui side pane (sidebar, browser view) directly: list tabs; show/hide the pane; open Browser, Files, Review, Terminal or extension tabs; select/close exact tab IDs; navigate/back/forward/reload/stop browser pages; capture a screenshot of the browser page or side pane tab the user is looking at; read a browser page's text, headings, links and form fields. No macOS desktop permissions are needed.",
     promptSnippet:
       "workbench: see (capture) and control pi-gui's side pane: the built-in browser view, Files, Review, Terminal and extension tabs.",
     promptGuidelines: [
       'When the user refers to what is in the browser, browser view, preview, side pane or sidebar ("what\'s in my browser", "look at this page"), call workbench action=capture. It returns a screenshot of just that page with its url and title. Do not take full-window or desktop screenshots, or use OS/desktop automation, to see pi-gui\'s side pane.',
+      "Use workbench action=read for a browser page's exact text, links or form fields (long pages, copying text, finding a URL); add format=html only when the markup itself matters. Use capture when layout or visuals matter.",
       "Use workbench action=open tool=browser url=... when asked to show a page or preview in pi-gui. Do not ask the user to paste a URL or use OS automation for the side pane.",
-      "Use list to obtain exact tab_id values before selecting, closing, navigating or capturing a tab other than the selected one. capture is read-only: it never changes tabs or visibility. Browser opens create a new top-level page; navigate changes an existing browser page.",
+      "Use list to obtain exact tab_id values before selecting, closing, navigating, capturing or reading a tab other than the selected one. capture and read are read-only: it never changes tabs or visibility. Browser opens create a new top-level page; navigate changes an existing browser page.",
       "Only the requesting chat's pane is controlled. If this chat is not visible, ask the user to open it rather than changing a different chat.",
     ],
     parameters: {
@@ -148,6 +152,7 @@ export function createWorkbenchAgentTool(
           enum: [
             "list",
             "capture",
+            "read",
             "open",
             "select",
             "close",
@@ -164,12 +169,17 @@ export function createWorkbenchAgentTool(
         tab_id: {
           type: "string",
           description:
-            "Exact top-level tab ID returned by list. capture defaults to the selected tab.",
+            "Exact top-level tab ID returned by list. capture and read default to the selected tab.",
         },
         url: { type: "string", description: "HTTP/HTTPS URL or localhost address." },
         path: { type: "string", description: "Workspace-relative file to show in Files." },
         extension_id: { type: "string" },
         view_id: { type: "string" },
+        format: {
+          type: "string",
+          enum: ["text", "html"],
+          description: "read only: html also returns the page's raw HTML, capped.",
+        },
       },
       required: ["action"],
       additionalProperties: false,

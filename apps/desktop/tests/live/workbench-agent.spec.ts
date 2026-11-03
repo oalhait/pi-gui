@@ -168,7 +168,7 @@ test("a real agent captures the side pane browser when asked what is in it", asy
   // The distinctive words are only painted in the page body, not in its title or URL.
   const server = createServer((_request, response) =>
     response.end(
-      "<title>Team dashboard</title><body style='font:32px sans-serif;padding:24px'><h1>Quarterly kiwi forecast</h1><p>Orbit code: VIOLET-4729</p></body>",
+      "<title>Team dashboard</title><body style='font:32px sans-serif;padding:24px'><h1>Quarterly kiwi forecast</h1><p>Orbit code: VIOLET-4729</p><a href='/docs/kiwi-terms-8812'>Terms</a></body>",
     ),
   );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -220,13 +220,23 @@ test("a real agent captures the side pane browser when asked what is in it", asy
     await window.screenshot({ path: test.info().outputPath("before-question.png") });
 
     const composer = window.getByTestId("composer");
-    await composer.fill("What's in my browser view?");
-    await composer.press("Enter");
-    await idle();
-    const answer = window.locator(".timeline-item--assistant .message__content").last();
+    const replies = window.locator(".timeline-item--assistant .message__content");
+    const ask = async (question: string) => {
+      const before = await replies.count();
+      await composer.fill(question);
+      await composer.press("Enter");
+      await expect.poll(() => replies.count(), { timeout: 150_000 }).toBeGreaterThan(before);
+      await idle();
+    };
+    await ask("What's in my browser view?");
+    const answer = replies.last();
     await expect(answer).toContainText(/kiwi/i);
     await expect(answer).toContainText("4729");
     await window.screenshot({ path: test.info().outputPath("answer.png") });
+
+    // Exact link targets are not visible in pixels; the agent should read the page text.
+    await ask("What is the exact URL the Terms link in my browser view points to?");
+    await expect(answer).toContainText("/docs/kiwi-terms-8812");
 
     const calls = await recordedToolCalls(agentDir);
     await writeFile(test.info().outputPath("tool-calls.json"), JSON.stringify(calls, null, 2));
@@ -235,6 +245,12 @@ test("a real agent captures the side pane browser when asked what is in it", asy
         call.name === "workbench" && (call.arguments as { action?: string }).action === "capture",
     );
     expect(captures.length).toBeGreaterThan(0);
+    expect(
+      calls.some(
+        (call) =>
+          call.name === "workbench" && (call.arguments as { action?: string }).action === "read",
+      ),
+    ).toBe(true);
     // Seen directly through workbench: no tool search, shell screenshots or desktop automation.
     expect(calls.map((call) => call.name).filter((name) => name !== "workbench")).toEqual([]);
   } finally {

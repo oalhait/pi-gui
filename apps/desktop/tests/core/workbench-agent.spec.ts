@@ -415,3 +415,110 @@ test("capture returns the browser page itself, read-only, and explains hidden or
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("read returns a bounded text view of the page from an isolated world", async () => {
+  const page = `<title>Signup form</title>
+<script>
+  // Page scripts cannot change what the isolated read sees, or see it run.
+  document.querySelectorAll = () => [];
+  Object.defineProperty(HTMLElement.prototype, "innerText", { get: () => "tampered" });
+</script>
+<body>
+<h1>Create account</h1><h2>Plans</h2>
+<p>Starter plan includes ${"many words ".repeat(2000)}</p>
+<a href="/terms">Terms of service</a><a href="https://example.com/help" style="display:none">Hidden help</a>
+<label>Email <input name="email" value="user@example.com"></label>
+<label>Password <input type="password" name="password" value="hunter2"></label>
+<input type="hidden" name="csrf" value="secret-token">
+<label><input type="checkbox" name="agree" checked> Agree</label>
+<select name="plan"><option>Starter</option><option selected>Pro</option></select>
+<button type="submit">Sign up</button>
+</body>`;
+  const server = createServer((_req, res) => res.end(page));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address();
+  if (!port || typeof port === "string") throw new Error("Missing test port");
+  const url = `http://127.0.0.1:${port.port}/`;
+  const harness = await launchDesktop(await makeUserDataDir(), {
+    initialWorkspaces: [await makeWorkspace("agent-read")],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Read Alpha");
+    const snapshot = await getDesktopState(window);
+    const target = {
+      workspaceId: snapshot.selectedWorkspaceId,
+      sessionId: snapshot.selectedSessionId,
+    };
+    const read = async (params: Record<string, string>) =>
+      (await harness.electronApp.evaluate(
+        async (_electron, input) =>
+          (
+            globalThis as typeof globalThis & {
+              __PI_APP_TEST_HOOKS: {
+                runWorkbenchRuntimeTool: (input: unknown) => Promise<unknown>;
+              };
+            }
+          ).__PI_APP_TEST_HOOKS.runWorkbenchRuntimeTool(input),
+        { sessionRef: target, params: { action: "read", ...params } },
+      )) as CaptureResult;
+    expect((await read({})).details.error).toContain("browser tabs only");
+    const opened = await run(harness, target, { action: "open", tool: "browser" });
+    const tabId = opened.selectedTabId!;
+    expect(String((await read({})).details.note)).toContain("blank");
+    await run(harness, target, { action: "navigate", tab_id: tabId, url });
+    await expect.poll(async () => (await read({})).details.title).toBe("Signup form");
+
+    const result = await read({});
+    expect(result.content).toHaveLength(1);
+    const details = result.details as Record<string, unknown> & {
+      text: string;
+      headings: unknown[];
+      links: { text: string; href: string }[];
+      fields: Record<string, unknown>[];
+    };
+    expect(details).toMatchObject({ tab_id: tabId, url, kind: "browser", text_truncated: true });
+    expect(details.text).toContain("Create account");
+    expect(details.text).not.toContain("tampered");
+    expect(details.text.length).toBeLessThanOrEqual(12_000);
+    expect(details.headings).toEqual([
+      { level: 1, text: "Create account" },
+      { level: 2, text: "Plans" },
+    ]);
+    expect(details.links).toEqual([{ text: "Terms of service", href: `${url}terms` }]);
+    expect(details.fields).toEqual([
+      { tag: "input", type: "text", name: "email", label: "Email", value: "user@example.com" },
+      { tag: "input", type: "password", name: "password", label: "Password" },
+      { tag: "input", type: "checkbox", name: "agree", label: "Agree", checked: true },
+      { tag: "select", type: "select", name: "plan", value: "Pro" },
+      { tag: "button", type: "submit", value: "Sign up" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("hunter2");
+    expect(JSON.stringify(result)).not.toContain("secret-token");
+    expect(details).not.toHaveProperty("html");
+
+    const html = (await read({ format: "html" })).details;
+    expect(String(html.html)).toContain("<h1>Create account</h1>");
+    expect(String(html.html).length).toBeLessThanOrEqual(60_000);
+
+    // The extraction left nothing behind in the page's own world.
+    const pageGlobals = await harness.electronApp.evaluate(async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find((entry) => entry.getURL() === url)!;
+      return (await contents.executeJavaScript(
+        "[typeof piApp, typeof require, Object.keys(window).filter((key) => key.startsWith('__pi')).length]",
+      )) as unknown[];
+    }, url);
+    expect(pageGlobals).toEqual(["undefined", "undefined", 0]);
+
+    // Read is read-only and scoped to this chat.
+    await run(harness, target, { action: "hide" });
+    expect((await read({ tab_id: tabId })).details).toMatchObject({ visible_to_user: false });
+    expect((await run(harness, target, { action: "list" })).visible).toBe(false);
+    await createNamedThread(window, "Read Bravo");
+    expect((await read({ tab_id: tabId })).details.error).toContain("Open this chat");
+  } finally {
+    await harness.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

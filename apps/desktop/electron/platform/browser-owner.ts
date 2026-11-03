@@ -29,6 +29,12 @@ import {
   platformShortcutModifier,
 } from "../../contracts/ipc";
 import type { WindowOwner } from "../windows/window-owner";
+import {
+  normalizePageText,
+  PAGE_TEXT_WORLD_ID,
+  pageTextScript,
+  type PageText,
+} from "./browser-page-text";
 
 const chromeShortcuts = new WeakMap<
   WebContents,
@@ -64,7 +70,7 @@ interface Host {
   layout?: BrowserLayout;
   visibleTab?: Tab;
 }
-export interface BrowserPageCapture {
+export interface BrowserPageSummary {
   readonly url: string;
   readonly title: string;
   readonly loading: boolean;
@@ -72,8 +78,13 @@ export interface BrowserPageCapture {
   readonly viewport: { readonly width: number; readonly height: number };
   /** The page's native view is currently presented in the side pane. */
   readonly shown: boolean;
-  readonly image?: NativeImage;
   readonly unavailable?: string;
+}
+export interface BrowserPageCapture extends BrowserPageSummary {
+  readonly image?: NativeImage;
+}
+export interface BrowserPageText extends BrowserPageSummary {
+  readonly content?: PageText;
 }
 interface SavedRoot {
   readonly urls: readonly string[];
@@ -243,6 +254,36 @@ export class BrowserOwner {
     return this.nextSnapshot(root);
   }
 
+  /** Bounded text view of one of a chat's pages, extracted in an isolated world. */
+  async readPage(
+    window: BrowserWindow,
+    target: BrowserMount["target"],
+    pageId: string,
+    includeHtml: boolean,
+  ): Promise<BrowserPageText> {
+    const { tab, root, host } = this.chatPage(window, target, pageId);
+    const contents = tab.view.webContents;
+    const page = this.pageSummary(host, root, tab);
+    const unavailable = this.unreadable(tab);
+    if (unavailable) return { ...page, unavailable };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raw: unknown = await Promise.race([
+        contents.executeJavaScriptInIsolatedWorld(PAGE_TEXT_WORLD_ID, [
+          { code: pageTextScript(includeHtml) },
+        ]),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("timeout")), 5_000);
+        }),
+      ]);
+      return { ...page, content: normalizePageText(raw, includeHtml) };
+    } catch {
+      return { ...page, unavailable: "The page did not return its text in time. Try again." };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   /**
    * Read-only snapshot of one of a chat's pages, captured from the page's own contents so the
    * window can be in the background or covered. Never changes tabs, selection or visibility.
@@ -252,26 +293,12 @@ export class BrowserOwner {
     target: BrowserMount["target"],
     pageId: string,
   ): Promise<BrowserPageCapture> {
-    const host = this.hosts.get(window.webContents.id);
-    const root = host?.roots.get(JSON.stringify([target.workspaceId, target.sessionId]));
-    const tab = root?.tabs.find((entry) => entry.id === pageId);
-    if (!host || !root || !tab || tab.view.webContents.isDestroyed())
-      throw new Error("This browser page is not loaded in this chat's side pane.");
+    const { tab, root, host } = this.chatPage(window, target, pageId);
     const contents = tab.view.webContents;
-    const bounds = tab.view.getBounds();
-    const page = {
-      url: tab.url,
-      title: tab.url === "about:blank" ? "New tab" : contents.getTitle() || "New tab",
-      loading: contents.isLoading(),
-      ...(tab.error ? { error: tab.error } : {}),
-      viewport: { width: bounds.width, height: bounds.height },
-      shown: host.root === root && host.visibleTab === tab && Boolean(host.layout?.visible),
-    };
-    if (tab.error) return { ...page, unavailable: `The page failed to load: ${tab.error}` };
-    if (tab.url === "about:blank")
-      return { ...page, unavailable: "The browser tab is blank (about:blank)." };
-    if (contents.isCrashed())
-      return { ...page, unavailable: "The page stopped responding. Reload it first." };
+    const page = this.pageSummary(host, root, tab);
+    const bounds = page.viewport;
+    const unavailable = this.unreadable(tab);
+    if (unavailable) return { ...page, unavailable };
     if (bounds.width <= 0 || bounds.height <= 0)
       return {
         ...page,
@@ -282,6 +309,37 @@ export class BrowserOwner {
     if (image.isEmpty())
       return { ...page, unavailable: "The page has not rendered any content yet." };
     return { ...page, image };
+  }
+
+  /** Only the requesting chat's pages in this window; never another chat's root. */
+  private chatPage(window: BrowserWindow, target: BrowserMount["target"], pageId: string) {
+    const host = this.hosts.get(window.webContents.id);
+    const root = host?.roots.get(JSON.stringify([target.workspaceId, target.sessionId]));
+    const tab = root?.tabs.find((entry) => entry.id === pageId);
+    if (!host || !root || !tab || tab.view.webContents.isDestroyed())
+      throw new Error("This browser page is not loaded in this chat's side pane.");
+    return { host, root, tab };
+  }
+
+  /** Why a page has nothing to capture or read: a load error, a blank tab or a crash. */
+  private unreadable(tab: Tab): string | undefined {
+    if (tab.error) return `The page failed to load: ${tab.error}`;
+    if (tab.url === "about:blank") return "The browser tab is blank (about:blank).";
+    if (tab.view.webContents.isCrashed()) return "The page stopped responding. Reload it first.";
+    return undefined;
+  }
+
+  private pageSummary(host: Host, root: Root, tab: Tab): BrowserPageSummary {
+    const contents = tab.view.webContents;
+    const bounds = tab.view.getBounds();
+    return {
+      url: tab.url,
+      title: tab.url === "about:blank" ? "New tab" : contents.getTitle() || "New tab",
+      loading: contents.isLoading(),
+      ...(tab.error ? { error: tab.error } : {}),
+      viewport: { width: bounds.width, height: bounds.height },
+      shown: host.root === root && host.visibleTab === tab && Boolean(host.layout?.visible),
+    };
   }
 
   private assertTarget(window: BrowserWindow, mount: BrowserMount): void {

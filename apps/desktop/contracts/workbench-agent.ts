@@ -14,13 +14,16 @@ export interface WorkbenchAgentCommand {
     | "forward"
     | "reload"
     | "stop"
-    | "capture";
+    | "capture"
+    | "read";
   readonly tool?: "browser" | "files" | "review" | "terminal" | "extension";
   readonly tab_id?: string;
   readonly url?: string;
   readonly path?: string;
   readonly extension_id?: string;
   readonly view_id?: string;
+  /** read only: "html" adds the page's capped raw HTML to the text extraction. */
+  readonly format?: "text" | "html";
 }
 export interface WorkbenchAgentState {
   readonly visible: boolean;
@@ -33,7 +36,7 @@ export interface WorkbenchCaptureRect {
   readonly width: number;
   readonly height: number;
 }
-/** What the renderer resolved for a read-only capture; main takes the pixels itself. */
+/** The tab the renderer resolved for a read-only capture or read; main reads the page itself. */
 export type WorkbenchCaptureTarget =
   | {
       readonly kind: "browser";
@@ -69,7 +72,7 @@ export function decodeWorkbenchAgentCommand(value: unknown): WorkbenchAgentComma
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid workbench command.");
   const input = value as Record<string, unknown>;
-  const keys = ["action", "tool", "tab_id", "url", "path", "extension_id", "view_id"];
+  const keys = ["action", "tool", "tab_id", "url", "path", "extension_id", "view_id", "format"];
   if (Object.keys(input).some((key) => !keys.includes(key)))
     throw new Error("Unsupported workbench command field.");
   if (
@@ -86,6 +89,7 @@ export function decodeWorkbenchAgentCommand(value: unknown): WorkbenchAgentComma
       "reload",
       "stop",
       "capture",
+      "read",
     ].includes(String(input.action))
   )
     throw new Error("Unknown workbench action.");
@@ -104,10 +108,15 @@ export function decodeWorkbenchAgentCommand(value: unknown): WorkbenchAgentComma
   )
     throw new Error("Unknown workbench tool.");
   if (
-    input.action === "capture" &&
+    (input.action === "capture" || input.action === "read") &&
     (input.tool !== undefined || input.extension_id !== undefined || input.view_id !== undefined)
   )
-    throw new Error("capture accepts only an optional tab_id from list.");
+    throw new Error(`${String(input.action)} accepts only an optional tab_id from list.`);
+  if (
+    input.format !== undefined &&
+    (input.action !== "read" || !["text", "html"].includes(String(input.format)))
+  )
+    throw new Error('format is "text" or "html" and applies only to read.');
   if (input.action === "open" && !input.tool) throw new Error("open requires a tool.");
   if ((input.action === "select" || input.action === "close") && !input.tab_id)
     throw new Error("Select or close requires an exact tab_id from list.");

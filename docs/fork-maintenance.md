@@ -41,6 +41,13 @@ and only while selected and visible. Images are downscaled to a 1600px longest e
 memory; tool details never contain image bytes. Pi does persist the returned image in the
 session transcript like any other tool-result image.
 
+`read` (browser tabs only, optional `tab_id`) returns the page’s url, title, visible text (12,000
+characters), headings (50), visible links (100) and form fields (50), each item capped. It runs a
+script with `executeJavaScriptInIsolatedWorld`, so it shares the DOM but none of the page’s
+JavaScript and nothing of pi-gui; main rebuilds the answer with known fields and caps. Password,
+file, hidden and credit-card/one-time-code fields never return values. `format: "html"` adds raw
+HTML capped at 60,000 characters. The script has a 5-second deadline.
+
 The tool is registered with `exposure: "direct"`, so it is declared from session start and stays
 declared when a deferred MCP server (such as Slack) activates `tool_search` or extensions reload;
 the unit regression in `tests/unit/workbench-agent.spec.ts` covers this.

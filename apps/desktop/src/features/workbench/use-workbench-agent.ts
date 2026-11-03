@@ -166,12 +166,18 @@ export function useWorkbenchAgent(
       switch (command.action) {
         case "list":
           break;
-        case "capture": {
+        case "capture":
+        case "read": {
           const id =
             command.tab_id ??
             (value.view.selection.kind === "tool" ? value.view.selection.toolId : undefined);
           if (!id) throw new Error("No side pane tab is selected. Use list to choose a tab_id.");
-          return { state: state(), capture: captureTarget(id) };
+          const target = captureTarget(id);
+          if (command.action === "read" && target.kind !== "browser")
+            throw new Error(
+              "read works on browser tabs only. Pass a browser tab_id from list, or use capture for this tab.",
+            );
+          return { state: state(), capture: target };
         }
         case "show":
         case "hide": {

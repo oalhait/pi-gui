@@ -8,6 +8,7 @@ import {
   createWorkbenchAgentTool,
 } from "../../electron/platform/workbench-agent";
 import { captureSize } from "../../electron/platform/workbench-capture";
+import { normalizePageText, PAGE_TEXT_LIMITS } from "../../electron/platform/browser-page-text";
 import { expect, test } from "@playwright/test";
 import {
   decodeWorkbenchAgentCommand,
@@ -275,4 +276,56 @@ test("workbench stays declared with its rules next to deferred tools and across 
   } finally {
     session.dispose();
   }
+});
+
+test("read is a browser-only text view whose html format is opt-in", () => {
+  expect(decodeWorkbenchAgentCommand({ action: "read", format: "html" })).toEqual({
+    action: "read",
+    format: "html",
+  });
+  for (const input of [
+    { action: "read", tool: "browser" },
+    { action: "read", format: "dom" },
+    { action: "capture", format: "html" },
+    { action: "list", format: "text" },
+  ])
+    expect(() => decodeWorkbenchAgentCommand(input)).toThrow();
+});
+
+test("page text from the page is rebuilt with known fields and hard caps", () => {
+  const huge = "x".repeat(PAGE_TEXT_LIMITS.text + 50);
+  const page = normalizePageText(
+    {
+      text: huge,
+      headings: Array.from({ length: 80 }, () => ({ level: 9, text: "Heading", extra: "drop" })),
+      links: [{ text: "Docs", href: "https://example.com/docs" }, "not a link"],
+      fields: [
+        { tag: "input", type: "email", name: "email", value: "a@b.c", disabled: false },
+        { tag: "input", type: "checkbox", name: "agree", checked: true, script: "drop" },
+      ],
+      html: "<p>markup</p>",
+      scroll: { y: 10.4, height: Infinity, viewport: "900" },
+      injected: { secret: true },
+    },
+    false,
+  );
+  expect(page.text).toHaveLength(PAGE_TEXT_LIMITS.text);
+  expect(page.text_truncated).toBe(true);
+  expect(page.headings).toHaveLength(PAGE_TEXT_LIMITS.headings);
+  expect(page.headings[0]).toEqual({ level: 6, text: "Heading" });
+  expect(page.links).toEqual([
+    { text: "Docs", href: "https://example.com/docs" },
+    { text: "", href: "" },
+  ]);
+  expect(page.fields).toEqual([
+    { tag: "input", type: "email", name: "email", value: "a@b.c" },
+    { tag: "input", type: "checkbox", name: "agree", checked: true },
+  ]);
+  expect(page).not.toHaveProperty("html");
+  expect(page).not.toHaveProperty("injected");
+  expect(page.scroll).toEqual({ y: 10, height: 0, viewport: 0 });
+  const html = normalizePageText({ html: "y".repeat(PAGE_TEXT_LIMITS.html + 1) }, true);
+  expect(html.html).toHaveLength(PAGE_TEXT_LIMITS.html);
+  expect(html.html_truncated).toBe(true);
+  expect(normalizePageText("not an object", true)).toMatchObject({ text: "", links: [] });
 });

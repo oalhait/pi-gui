@@ -1,7 +1,10 @@
 import { nativeImage, type BrowserWindow, type NativeImage } from "electron";
 import type { SessionRef } from "@pi-gui/session-driver";
-import type { WorkbenchCaptureTarget } from "../../contracts/workbench-agent";
-import type { BrowserOwner } from "./browser-owner";
+import type {
+  WorkbenchAgentCommand,
+  WorkbenchCaptureTarget,
+} from "../../contracts/workbench-agent";
+import type { BrowserOwner, BrowserPageSummary } from "./browser-owner";
 
 /** Longest edge sent to the model. Larger captures are downscaled, never cropped. */
 export const MAX_CAPTURE_EDGE = 1600;
@@ -18,10 +21,12 @@ export interface WorkbenchCaptureResult {
   readonly summary: Record<string, unknown>;
   readonly image?: WorkbenchCaptureImage;
 }
+/** Runs a resolved capture or read against the window and this chat's pages. */
 export type WorkbenchCapturer = (
   window: BrowserWindow,
   target: SessionRef,
-  capture: WorkbenchCaptureTarget,
+  resolved: WorkbenchCaptureTarget,
+  command: WorkbenchAgentCommand,
 ) => Promise<WorkbenchCaptureResult>;
 
 export function captureSize(
@@ -63,34 +68,58 @@ export function encodeCaptureImage(image: NativeImage): WorkbenchCaptureImage | 
   };
 }
 
+function pageSummary(
+  capture: Extract<WorkbenchCaptureTarget, { kind: "browser" }>,
+  page: BrowserPageSummary,
+  missing?: string,
+): Record<string, unknown> {
+  const notes: string[] = [];
+  if (page.unavailable) notes.push(page.unavailable);
+  else if (missing) notes.push(missing);
+  if (!capture.selected)
+    notes.push(
+      "The user is not looking at this page right now: another tab is selected or the side pane is hidden.",
+    );
+  else if (!page.shown && !page.unavailable)
+    notes.push(
+      "The page is covered by a pi-gui dialog, menu or overlay, so the user may not see it right now.",
+    );
+  return {
+    tab_id: capture.tabId,
+    kind: "browser",
+    url: page.url,
+    title: page.title,
+    loading: page.loading,
+    ...(page.error ? { error: page.error } : {}),
+    viewport: page.viewport,
+    visible_to_user: capture.selected && page.shown,
+    ...(notes.length ? { note: notes.join(" ") } : {}),
+  };
+}
+
 export function createWorkbenchCapturer(browser: () => BrowserOwner): WorkbenchCapturer {
-  return async (window, target, capture) => {
+  return async (window, target, capture, command) => {
+    if (command.action === "read") {
+      if (capture.kind !== "browser") throw new Error("read works on browser tabs only.");
+      const page = await browser().readPage(
+        window,
+        target,
+        capture.pageId,
+        command.format === "html",
+      );
+      return { summary: { ...pageSummary(capture, page), ...(page.content ?? {}) } };
+    }
     if (capture.kind === "browser") {
       const page = await browser().capturePage(window, target, capture.pageId);
       const image = page.image ? encodeCaptureImage(page.image) : undefined;
-      const notes: string[] = [];
-      if (page.unavailable) notes.push(page.unavailable);
-      else if (!image) notes.push("The page has not rendered any content yet.");
-      if (!capture.selected)
-        notes.push(
-          "The user is not looking at this page right now: another tab is selected or the side pane is hidden.",
-        );
-      else if (!page.shown && !page.unavailable)
-        notes.push(
-          "The page is covered by a pi-gui dialog, menu or overlay, so the user may not see it right now.",
-        );
       return {
         summary: {
-          tab_id: capture.tabId,
-          kind: "browser",
-          url: page.url,
-          title: page.title,
-          loading: page.loading,
-          ...(page.error ? { error: page.error } : {}),
-          viewport: page.viewport,
-          visible_to_user: capture.selected && page.shown,
+          ...pageSummary(
+            capture,
+            page,
+            image ? undefined : "The page has not rendered any content yet.",
+          ),
           image: image ? { width: image.width, height: image.height } : null,
-          ...(notes.length ? { note: notes.join(" ") } : {}),
         },
         ...(image ? { image } : {}),
       };
