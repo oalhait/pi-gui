@@ -1,29 +1,42 @@
 import type { BrowserTabState } from "../../../contracts/browser";
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   formatShortcut,
   getSidePanelTabShortcutLabel,
   SIDE_PANEL_TAB_SHORTCUT_SLOT_COUNT,
+  type TerminalSessionSnapshot,
 } from "../../../contracts/ipc";
 import { toolRefId, type TaskWorkbenchTemplate, type ToolRef } from "../../../contracts/workbench";
 import type { DesktopExtensionViewInfo } from "../../../contracts/extension-views";
-import { CloseIcon, ExtensionIcon, PlusIcon, SidePanelIcon } from "../../ui/icons";
+import { CloseIcon, ExtensionIcon, FileIcon, PlusIcon, SidePanelIcon } from "../../ui/icons";
 import { BUILTIN_TOOL_ENTRIES, BUILTIN_TOOLS } from "./builtin-tools";
+import { fileNameFromPath, fileTabLabels } from "./file-workbench-state";
 import { WorkbenchResizeHandle } from "./workbench-resize-handle";
 import { activeWorkbenchTool, workbenchCloseNeighbor } from "./workbench-state";
 
 interface WorkbenchProps {
   readonly view: TaskWorkbenchTemplate;
   readonly browserTabs?: readonly BrowserTabState[];
+  readonly terminalSessions?: readonly TerminalSessionSnapshot[];
   readonly platform: NodeJS.Platform;
   /** Whether the side panel tab modifier is held, so tabs show their numbers. */
   readonly tabHintsVisible: boolean;
   readonly onResize: (width: number) => void;
   readonly onTogglePanel: () => void;
   readonly onOpenTool: (tool: ToolRef) => void;
+  /** Opens another tab of this kind: a new browser page or terminal, or focuses a singleton. */
+  readonly onNewTab: (tool: ToolRef) => void;
   readonly onActivateTool: (toolId: string) => void;
   readonly onCloseTool: (toolId: string) => void;
-  readonly onShowChooser: () => void;
   readonly children?: ReactNode;
   readonly error?: string;
   readonly loading?: boolean;
@@ -35,11 +48,14 @@ interface WorkbenchProps {
 }
 
 export function workbenchToolLabel(tool: ToolRef): string {
-  return tool.kind === "extension" ? tool.viewId : BUILTIN_TOOLS[tool.kind].label;
+  if (tool.kind === "extension") return tool.viewId;
+  if (tool.kind === "file") return fileNameFromPath(tool.path);
+  return BUILTIN_TOOLS[tool.kind].label;
 }
 
 function ToolIcon({ tool }: { readonly tool: ToolRef }) {
   if (tool.kind === "extension") return <ExtensionIcon />;
+  if (tool.kind === "file") return <FileIcon />;
   const { Icon } = BUILTIN_TOOLS[tool.kind];
   return <Icon />;
 }
@@ -47,14 +63,15 @@ function ToolIcon({ tool }: { readonly tool: ToolRef }) {
 export function Workbench({
   view,
   browserTabs,
+  terminalSessions,
   platform,
   tabHintsVisible,
   onResize,
   onTogglePanel,
   onOpenTool,
+  onNewTab,
   onActivateTool,
   onCloseTool,
-  onShowChooser,
   children,
   error,
   loading = false,
@@ -67,7 +84,31 @@ export function Workbench({
   const panelId = useId();
   const addRef = useRef<HTMLButtonElement | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const tabsRef = useRef<HTMLDivElement | null>(null);
   const activeTool = activeWorkbenchTool(view);
+  const fileLabels = useMemo(
+    () => fileTabLabels(view.tools.flatMap((tool) => (tool.kind === "file" ? [tool.path] : []))),
+    [view.tools],
+  );
+  const tabLabel = (tool: ToolRef): string => {
+    switch (tool.kind) {
+      case "extension":
+        return (
+          extensionViews.find(
+            (entry) => entry.extensionId === tool.extensionId && entry.id === tool.viewId,
+          )?.title ?? workbenchToolLabel(tool)
+        );
+      case "browser":
+        return browserTabs?.find((tab) => tab.id === tool.pageId)?.title ?? "Browser";
+      case "file":
+        return fileLabels.get(tool.path) ?? workbenchToolLabel(tool);
+      case "terminal":
+        // The shell's title, or its numbered default ("Terminal 2") until it sets one.
+        return terminalSessions?.find((entry) => entry.id === tool.sessionId)?.title || "Terminal";
+      default:
+        return workbenchToolLabel(tool);
+    }
+  };
   const activeExtension =
     activeTool?.kind === "extension"
       ? extensionViews.find(
@@ -130,17 +171,26 @@ export function Workbench({
     >
       <WorkbenchResizeHandle onResize={onResize} />
       <div className="workbench__tabbar">
-        <div aria-label="Workspace tools" className="workbench__tabs" role="tablist">
+        <div
+          aria-label="Workspace tools"
+          className="workbench__tabs"
+          onWheel={(event) => {
+            // A vertical wheel scrolls an overflowing tab row sideways.
+            const row = tabsRef.current;
+            if (row && Math.abs(event.deltaY) > Math.abs(event.deltaX))
+              row.scrollLeft += event.deltaY;
+          }}
+          ref={tabsRef}
+          role="tablist"
+        >
           {view.tools.map((tool, index) => {
             const toolId = toolRefId(tool);
-            const label =
-              tool.kind === "extension"
-                ? (extensionViews.find(
-                    (entry) => entry.extensionId === tool.extensionId && entry.id === tool.viewId,
-                  )?.title ?? workbenchToolLabel(tool))
-                : tool.kind === "browser"
-                  ? (browserTabs?.find((tab) => tab.id === tool.pageId)?.title ?? "Browser")
-                  : workbenchToolLabel(tool);
+            const label = tabLabel(tool);
+            const status =
+              tool.kind === "terminal"
+                ? terminalSessions?.find((entry) => entry.id === tool.sessionId)?.status
+                : undefined;
+            const tooltip = tool.kind === "file" ? tool.path : label;
             const selected = view.selection.kind === "tool" && view.selection.toolId === toolId;
             const slot = index < SIDE_PANEL_TAB_SHORTCUT_SLOT_COUNT ? index + 1 : undefined;
             const shortcut = slot ? getSidePanelTabShortcutLabel(platform, slot) : undefined;
@@ -166,7 +216,7 @@ export function Workbench({
                   }}
                   role="tab"
                   tabIndex={selected || (view.selection.kind === "chooser" && index === 0) ? 0 : -1}
-                  title={shortcut ? `${label} (${shortcut})` : label}
+                  title={shortcut ? `${tooltip} (${shortcut})` : tooltip}
                   type="button"
                 >
                   {tabHintsVisible && shortcut ? (
@@ -177,6 +227,12 @@ export function Workbench({
                     <ToolIcon tool={tool} />
                   )}
                   <span>{label}</span>
+                  {status && status !== "running" ? (
+                    <span
+                      aria-label={status === "error" ? "failed" : "exited"}
+                      className={`workbench__terminal-status workbench__terminal-status--${status}`}
+                    />
+                  ) : null}
                 </button>
                 <button
                   aria-label={`Close ${label} tab`}
@@ -193,19 +249,13 @@ export function Workbench({
             );
           })}
         </div>
-        <button
-          aria-keyshortcuts={`${platform === "darwin" ? "Meta" : "Control"}+T`}
-          aria-label="Add tab"
-          className="workbench__add icon-button"
-          data-testid="workbench-add-tab"
+        <NewTabMenu
+          addRef={addRef}
           disabled={loading}
-          onClick={onShowChooser}
-          ref={addRef}
-          title={`Add tab (${formatShortcut(platform, "T")})`}
-          type="button"
-        >
-          <PlusIcon />
-        </button>
+          extensions={extensionViews}
+          onNewTab={onNewTab}
+          platform={platform}
+        />
         <button
           aria-label="Toggle side panel"
           aria-pressed="true"
@@ -255,7 +305,7 @@ export function Workbench({
                 aria-label={label}
                 className="workbench__choice"
                 key={kind}
-                onClick={() => onOpenTool({ kind })}
+                onClick={() => onNewTab({ kind })}
                 type="button"
               >
                 <span className="workbench__choice-icon">
@@ -348,5 +398,137 @@ export function Workbench({
         )}
       </div>
     </aside>
+  );
+}
+
+interface NewTabMenuProps {
+  readonly addRef: RefObject<HTMLButtonElement | null>;
+  readonly disabled: boolean;
+  readonly extensions: readonly DesktopExtensionViewInfo[];
+  readonly onNewTab: (tool: ToolRef) => void;
+  readonly platform: NodeJS.Platform;
+}
+
+/** The tab row's + menu: each choice opens one more top-level tab, or focuses a singleton. */
+function NewTabMenu({ addRef, disabled, extensions, onNewTab, platform }: NewTabMenuProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
+  useEffect(() => {
+    if (!open) return;
+    rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside, true);
+    return () => document.removeEventListener("pointerdown", closeOutside, true);
+  }, [open]);
+  const choose = (tool: ToolRef) => {
+    setOpen(false);
+    onNewTab(tool);
+  };
+  const items: {
+    readonly key: string;
+    readonly label: string;
+    readonly icon: ReactNode;
+    readonly tool: ToolRef;
+    readonly shortcutKey?: string;
+  }[] = [
+    ...BUILTIN_TOOL_ENTRIES.map(({ kind, Icon, shortcutKey }) => ({
+      key: kind,
+      label:
+        kind === "browser"
+          ? "New browser page"
+          : kind === "terminal"
+            ? "New terminal"
+            : BUILTIN_TOOLS[kind].label,
+      icon: <Icon />,
+      tool: { kind } as ToolRef,
+      // The Terminal chord focuses the most recent terminal; it does not add one.
+      shortcutKey: kind === "terminal" ? undefined : shortcutKey,
+    })),
+    ...extensions.map((extension) => {
+      const tool: ToolRef = {
+        kind: "extension",
+        extensionId: extension.extensionId,
+        viewId: extension.id,
+      };
+      return { key: toolRefId(tool), label: extension.title, icon: <ExtensionIcon />, tool };
+    }),
+  ];
+  return (
+    <div
+      className="workbench__new-tab"
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (!open) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          addRef.current?.focus();
+          return;
+        }
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        const entries = [
+          ...(rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []),
+        ];
+        const index = entries.indexOf(document.activeElement as HTMLButtonElement);
+        const next =
+          event.key === "ArrowDown"
+            ? (index + 1) % entries.length
+            : (index - 1 + entries.length) % entries.length;
+        entries[next]?.focus();
+      }}
+      ref={rootRef}
+    >
+      <button
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-keyshortcuts={`${platform === "darwin" ? "Meta" : "Control"}+T`}
+        aria-label="Add tab"
+        className="workbench__add icon-button"
+        data-testid="workbench-add-tab"
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+        ref={addRef}
+        title={`Add tab (${formatShortcut(platform, "T")})`}
+        type="button"
+      >
+        <PlusIcon />
+      </button>
+      {open ? (
+        <div
+          aria-label="Add tab"
+          className="workspace-menu workbench__new-tab-menu"
+          data-testid="workbench-new-tab-menu"
+          id={menuId}
+          role="menu"
+        >
+          {items.map((item) => (
+            <button
+              className="workspace-menu__item review-menu__item workbench__new-tab-item"
+              key={item.key}
+              onClick={() => choose(item.tool)}
+              role="menuitem"
+              tabIndex={-1}
+              type="button"
+            >
+              {item.icon}
+              <span>{item.label}</span>
+              {item.shortcutKey ? (
+                <kbd className="workspace-menu__shortcut">
+                  {formatShortcut(platform, item.shortcutKey)}
+                </kbd>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

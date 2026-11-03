@@ -209,6 +209,7 @@ export const desktopIpc = {
   setIntegratedTerminalShell: "pi-gui:set-integrated-terminal-shell",
   setEnableTransparency: "pi-gui:set-enable-transparency",
   terminalEnsurePanel: "pi-gui:terminal-ensure-panel",
+  terminalGetPanel: "pi-gui:terminal-get-panel",
   terminalCreateSession: "pi-gui:terminal-create-session",
   terminalSetActiveSession: "pi-gui:terminal-set-active-session",
   terminalWrite: "pi-gui:terminal-write",
@@ -888,6 +889,11 @@ export interface PiDesktopApi {
     terminalScopeId: string,
     size?: Partial<TerminalSize>,
   ): Promise<TerminalPanelSnapshot>;
+  /** This window's live terminals for the chat, without starting one; null when it has none. */
+  getTerminalPanel(
+    workspaceId: string,
+    terminalScopeId: string,
+  ): Promise<TerminalPanelSnapshot | null>;
   createTerminalSession(
     workspaceId: string,
     terminalScopeId: string,

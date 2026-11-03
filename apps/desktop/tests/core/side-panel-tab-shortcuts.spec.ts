@@ -31,6 +31,8 @@ test("Control or Alt with 1-9 selects side panel tabs while Cmd or Ctrl keeps sw
     await selectSidePanel(window, "Terminal");
     const tabs = window.getByRole("tablist", { name: "Workspace tools" });
     const tab = (name: string) => tabs.getByRole("tab", { name, exact: true });
+    // A terminal tab is titled by its shell, not "Terminal".
+    const terminalTab = tabs.locator('[role="tab"][data-testid^="workbench-tab-terminal:"]');
     await expect(tabs.getByRole("tab")).toHaveCount(3);
     await expect(tab("Review")).toHaveAttribute("title", `Review (${tabLabel(1)})`);
     await expect(tab("Files")).toHaveAttribute("title", `Files (${tabLabel(2)})`);
@@ -51,9 +53,9 @@ test("Control or Alt with 1-9 selects side panel tabs while Cmd or Ctrl keeps sw
     await composer.click();
     await window.keyboard.down(tabModifier);
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(3);
-    await expect(tab("Terminal").locator(".workbench__tab-shortcut")).toHaveText(tabLabel(3));
+    await expect(terminalTab.locator(".workbench__tab-shortcut")).toHaveText(tabLabel(3));
     await window.keyboard.press("3");
-    await expect(tab("Terminal")).toHaveAttribute("aria-selected", "true");
+    await expect(terminalTab).toHaveAttribute("aria-selected", "true");
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(3);
     await window.keyboard.up(tabModifier);
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(0);
@@ -71,7 +73,7 @@ test("Control or Alt with 1-9 selects side panel tabs while Cmd or Ctrl keeps sw
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(0);
 
     // Main-process path, from inside the terminal, which is itself a side panel tab.
-    await tab("Terminal").click();
+    await terminalTab.click();
     const terminal = window.getByTestId("integrated-terminal");
     await terminal.locator(".xterm").click();
     const sendDigit = (keyCode: string, modifiers: string[]) =>
@@ -124,7 +126,7 @@ test("Control or Alt with 1-9 selects side panel tabs while Cmd or Ctrl keeps sw
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(3);
     await sendKey("keyDown", "3", [mainModifier]);
     await sendKey("keyUp", "3", [mainModifier]);
-    await expect(tab("Terminal")).toHaveAttribute("aria-selected", "true");
+    await expect(terminalTab).toHaveAttribute("aria-selected", "true");
     await sendKey("keyUp", modifierKeyCode, []);
     await expect(tabs.locator("[data-tab-shortcut]")).toHaveCount(0);
 

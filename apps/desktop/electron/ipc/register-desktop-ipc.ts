@@ -1027,6 +1027,17 @@ function registerTerminalIpc(windows: WindowOwner, capabilities: DesktopIpcCapab
         ),
   );
   ipcMain.handle(
+    desktopIpc.terminalGetPanel,
+    (event, rawWorkspaceId: unknown, rawScopeId: unknown) =>
+      capabilities
+        .optionalTerminal()
+        ?.getPanel(
+          windows.windowForSender(event.sender).webContents,
+          expectNonEmptyString(rawWorkspaceId, "workspaceId"),
+          expectNonEmptyString(rawScopeId, "terminalScopeId"),
+        ) ?? null,
+  );
+  ipcMain.handle(
     desktopIpc.terminalCreateSession,
     (event, rawWorkspaceId: unknown, rawScopeId: unknown, rawSize: unknown) =>
       capabilities

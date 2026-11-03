@@ -1,130 +1,72 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import type { WorkspaceRecord } from "../../../contracts/desktop-state";
-import { CloseIcon, PlusIcon, RefreshIcon } from "../../ui/icons";
+import { RefreshIcon } from "../../ui/icons";
 import { getSidePanelTabCommand } from "../../../contracts/ipc";
 import type {
   TerminalPanelSnapshot,
   TerminalSessionSnapshot,
   TerminalSize,
 } from "../../../contracts/ipc";
-import { appendTerminalReplay } from "../../../contracts/terminal-model";
 import { getActiveTheme, useActiveTheme } from "../../ui/active-theme";
 import { terminalThemeFor } from "./terminal-theme";
 
 interface TerminalPanelProps {
-  readonly workspace: WorkspaceRecord;
-  readonly sessionId: string;
-  readonly onHide: () => void;
+  /** The one terminal this tab shows. */
+  readonly session: TerminalSessionSnapshot;
+  /** Output so far, read once when the view mounts. */
+  readonly replay: (terminalId: string) => string;
+  readonly onPanelChange: (panel: TerminalPanelSnapshot | null) => void;
+  readonly onTitleChange: (terminalId: string, title: string) => void;
+  /** Starts another terminal in its own tab. */
+  readonly onNewTerminal: () => Promise<unknown>;
+  /** Whether the new view may take focus: false once the user moved focus elsewhere. */
+  readonly shouldFocus: () => boolean;
 }
 
-export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelProps) {
+export function TerminalPanel({
+  session,
+  replay,
+  onPanelChange,
+  onTitleChange,
+  onNewTerminal,
+  shouldFocus,
+}: TerminalPanelProps) {
   const api = window.piApp;
+  const terminalId = session.id;
   const panelRef = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const activeTerminalIdRef = useRef("");
-  const mountedRef = useRef(false);
-  const focusRequested = useRef(true);
+  const focusRequested = useRef<boolean | null>(null);
+  if (focusRequested.current === null) focusRequested.current = shouldFocus();
   const lastSizeRef = useRef<TerminalSize>({ cols: 80, rows: 24 });
-  const [panel, setPanel] = useState<TerminalPanelSnapshot | null>(null);
   const [error, setError] = useState<string>("");
   const activeTheme = useActiveTheme();
+  const callbacks = useRef({ replay, onTitleChange, onNewTerminal });
+  callbacks.current = { replay, onTitleChange, onNewTerminal };
 
   useEffect(() => {
     const terminal = terminalRef.current;
     if (terminal) terminal.options.theme = terminalThemeFor(activeTheme);
   }, [activeTheme]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const activeSession = useMemo(
-    () => panel?.sessions.find((session) => session.id === panel.activeSessionId),
-    [panel],
-  );
-
-  const requestPanel = useCallback(async () => {
-    if (!api) {
-      return;
-    }
-    try {
-      const nextPanel = await api.ensureTerminalPanel(workspace.id, sessionId, lastSizeRef.current);
-      setPanel(nextPanel);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [api, sessionId, workspace.id]);
-
-  useEffect(() => {
-    setPanel(null);
-    setError("");
-    void requestPanel().catch((error: unknown) => {
-      setError(error instanceof Error ? error.message : String(error));
-    });
-  }, [requestPanel]);
-
-  const createTerminal = useCallback(async () => {
-    if (!api) {
-      return;
-    }
-    const nextPanel = await api.createTerminalSession(workspace.id, sessionId, lastSizeRef.current);
-    setPanel(nextPanel);
-  }, [api, sessionId, workspace.id]);
-
-  const setActiveTerminal = useCallback(
-    async (terminalId: string) => {
-      if (!api) {
-        return;
-      }
-      const nextPanel = await api.setActiveTerminalSession(workspace.id, sessionId, terminalId);
-      setPanel(nextPanel);
-    },
-    [api, sessionId, workspace.id],
-  );
-
-  const closeTerminal = useCallback(
-    async (terminalId: string) => {
-      if (!api) {
-        return;
-      }
-      const nextPanel = await api.closeTerminalSession(terminalId);
-      if (nextPanel) {
-        setPanel(nextPanel);
-      } else {
-        setPanel(null);
-        // Closing a shell may finish after its task or tool view was left.
-        // Never let that old view close the newly selected task's Terminal tab.
-        if (mountedRef.current) onHide();
-      }
-    },
-    [api, onHide],
-  );
-
   const restartTerminal = useCallback(async () => {
-    if (!api || !activeSession) {
+    if (!api) {
       return;
     }
-    const nextPanel = await api.restartTerminalSession(activeSession.id, lastSizeRef.current);
+    const nextPanel = await api.restartTerminalSession(terminalId, lastSizeRef.current);
     terminalRef.current?.reset();
-    setPanel(nextPanel);
-  }, [activeSession, api]);
+    onPanelChange(nextPanel);
+  }, [api, onPanelChange, terminalId]);
 
   const fitAndResize = useCallback(() => {
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
-    const terminalId = activeTerminalIdRef.current;
-    if (!api || !terminalId || !terminal || !fitAddon || !containerRef.current) {
+    if (!api || !terminal || !fitAddon || !containerRef.current) {
       return;
     }
     fitAddon.fit();
@@ -136,7 +78,7 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
     void api.resizeTerminal(terminalId, nextSize).catch((error: unknown) => {
       setError(error instanceof Error ? error.message : String(error));
     });
-  }, [api]);
+  }, [api, terminalId]);
 
   useLayoutEffect(() => {
     const panelElement = panelRef.current;
@@ -176,50 +118,25 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
     if (!api) {
       return undefined;
     }
+    // Output is written straight to the view; the workbench keeps the replay for remounts.
     const removeData = api.onTerminalData((event) => {
-      setPanel((currentPanel) =>
-        updateSession(currentPanel, event.terminalId, (session) => ({
-          ...session,
-          ...appendTerminalReplay(session.replay, event.data, session.truncated),
-        })),
-      );
-      if (event.terminalId === activeTerminalIdRef.current) {
-        terminalRef.current?.write(event.data);
-      }
-    });
-    const removeExit = api.onTerminalExit((event) => {
-      setPanel((currentPanel) =>
-        updateSession(currentPanel, event.terminalId, (session) => ({
-          ...session,
-          status: "exited",
-          exitCode: event.exitCode,
-          signal: event.signal,
-        })),
-      );
+      if (event.terminalId === terminalId) terminalRef.current?.write(event.data);
     });
     const removeError = api.onTerminalError((event) => {
-      setPanel((currentPanel) =>
-        updateSession(currentPanel, event.terminalId, (session) => ({
-          ...session,
-          status: "error",
-          ...appendTerminalReplay(session.replay, `${event.message}\r\n`, session.truncated),
-        })),
-      );
+      if (event.terminalId === terminalId) terminalRef.current?.write(`${event.message}\r\n`);
     });
     return () => {
       removeData();
-      removeExit();
       removeError();
     };
-  }, [api]);
+  }, [api, terminalId]);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!api || !container || !activeSession) {
+    if (!api || !container) {
       return undefined;
     }
 
-    activeTerminalIdRef.current = activeSession.id;
     const terminal = new Terminal({
       allowProposedApi: true,
       convertEol: true,
@@ -260,7 +177,8 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       const commandModifier = api.platform === "darwin" ? event.metaKey : event.ctrlKey;
       const key = event.key.toLowerCase();
       if (commandModifier && !event.shiftKey && key === "t") {
-        void createTerminal().catch((error: unknown) => {
+        // The shell keeps New Tab: it opens another terminal in its own tab.
+        void callbacks.current.onNewTerminal().catch((error: unknown) => {
           setError(error instanceof Error ? error.message : String(error));
         });
         return false;
@@ -278,7 +196,7 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       if (api.platform === "darwin" && event.metaKey) {
         const sequence = macTerminalSequenceForEvent(event);
         if (sequence) {
-          void api.writeTerminal(activeSession.id, sequence).catch((error: unknown) => {
+          void api.writeTerminal(terminalId, sequence).catch((error: unknown) => {
             setError(error instanceof Error ? error.message : String(error));
           });
           return false;
@@ -287,24 +205,15 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       return true;
     });
     terminal.onData((data) => {
-      void api.writeTerminal(activeSession.id, data).catch((error: unknown) => {
+      void api.writeTerminal(terminalId, data).catch((error: unknown) => {
         setError(error instanceof Error ? error.message : String(error));
       });
     });
-    terminal.onTitleChange((title) => {
-      void api.setTerminalTitle(activeSession.id, title).catch((error: unknown) => {
-        setError(error instanceof Error ? error.message : String(error));
-      });
-      setPanel((currentPanel) =>
-        updateSession(currentPanel, activeSession.id, (session) => ({
-          ...session,
-          title: title.trim() || session.title,
-        })),
-      );
-    });
+    terminal.onTitleChange((title) => callbacks.current.onTitleChange(terminalId, title));
     terminal.open(container);
-    if (activeSession.replay) {
-      terminal.write(activeSession.replay);
+    const replayed = callbacks.current.replay(terminalId);
+    if (replayed) {
+      terminal.write(replayed);
     }
     if (focusRequested.current) terminal.focus();
     terminalRef.current = terminal;
@@ -318,10 +227,9 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       resizeObserver.disconnect();
       fitAddonRef.current = null;
       terminalRef.current = null;
-      activeTerminalIdRef.current = "";
       terminal.dispose();
     };
-  }, [activeSession?.id, api, createTerminal, fitAndResize]);
+  }, [api, fitAndResize, terminalId]);
 
   return (
     <section
@@ -331,59 +239,17 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       data-testid="integrated-terminal"
     >
       <div className="terminal-panel__toolbar">
-        <div className="terminal-panel__tabs" role="tablist" aria-label="Terminal sessions">
-          {(panel?.sessions ?? []).map((session) => (
-            <div
-              key={session.id}
-              className={`terminal-panel__tab-item${session.id === panel?.activeSessionId ? " terminal-panel__tab-item--active" : ""}`}
-            >
-              <button
-                className="terminal-panel__tab"
-                type="button"
-                role="tab"
-                aria-selected={session.id === panel?.activeSessionId}
-                data-testid="terminal-tab"
-                onClick={() =>
-                  void setActiveTerminal(session.id).catch((error: unknown) => {
-                    setError(error instanceof Error ? error.message : String(error));
-                  })
-                }
-              >
-                <span
-                  className={`terminal-panel__status terminal-panel__status--${session.status}`}
-                />
-                <span className="terminal-panel__tab-title">{session.title}</span>
-              </button>
-              <button
-                type="button"
-                className="terminal-panel__tab-close"
-                aria-label={`Close ${session.title}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void closeTerminal(session.id).catch((error: unknown) => {
-                    setError(error instanceof Error ? error.message : String(error));
-                  });
-                }}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          ))}
-        </div>
+        <span className="terminal-panel__cwd" title={session.cwd}>
+          {session.cwd}
+        </span>
+        {session.status === "running" ? null : (
+          <span className="terminal-panel__exit" role="status">
+            {session.status === "error"
+              ? "Terminal failed"
+              : `Exited${session.exitCode === undefined ? "" : ` (${session.exitCode})`}`}
+          </span>
+        )}
         <div className="terminal-panel__actions">
-          <button
-            type="button"
-            className="icon-button terminal-panel__action"
-            title="New terminal"
-            aria-label="New terminal"
-            onClick={() =>
-              void createTerminal().catch((error: unknown) => {
-                setError(error instanceof Error ? error.message : String(error));
-              })
-            }
-          >
-            <PlusIcon />
-          </button>
           <button
             type="button"
             className="icon-button terminal-panel__action"
@@ -406,22 +272,6 @@ export function TerminalPanel({ workspace, sessionId, onHide }: TerminalPanelPro
       )}
     </section>
   );
-}
-
-function updateSession(
-  panel: TerminalPanelSnapshot | null,
-  terminalId: string,
-  update: (session: TerminalSessionSnapshot) => TerminalSessionSnapshot,
-): TerminalPanelSnapshot | null {
-  if (!panel) {
-    return panel;
-  }
-  return {
-    ...panel,
-    sessions: panel.sessions.map((session) =>
-      session.id === terminalId ? update(session) : session,
-    ),
-  };
 }
 
 function macTerminalSequenceForEvent(event: KeyboardEvent): string | undefined {

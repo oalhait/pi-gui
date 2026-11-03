@@ -22,6 +22,8 @@ export interface WorkbenchAgentCommand {
   readonly path?: string;
   readonly extension_id?: string;
   readonly view_id?: string;
+  /** open tool=terminal only: start another terminal instead of focusing the most recent. */
+  readonly new?: boolean;
   /** read only: "html" adds the page's capped raw HTML to the text extraction. */
   readonly format?: "text" | "html";
 }
@@ -68,12 +70,15 @@ export interface WorkbenchAgentResponse {
   readonly capture?: WorkbenchCaptureTarget;
   readonly error?: string;
 }
+/** Every top-level tab: up to 100 files plus the other tools, browser pages and terminals. */
+export const MAX_WORKBENCH_AGENT_TABS = 200;
+
 export function decodeWorkbenchAgentCommand(value: unknown): WorkbenchAgentCommand {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid workbench command.");
   const input = value as Record<string, unknown>;
   const keys = ["action", "tool", "tab_id", "url", "path", "extension_id", "view_id", "format"];
-  if (Object.keys(input).some((key) => !keys.includes(key)))
+  if (Object.keys(input).some((key) => key !== "new" && !keys.includes(key)))
     throw new Error("Unsupported workbench command field.");
   if (
     ![
@@ -118,6 +123,11 @@ export function decodeWorkbenchAgentCommand(value: unknown): WorkbenchAgentComma
   )
     throw new Error('format is "text" or "html" and applies only to read.');
   if (input.action === "open" && !input.tool) throw new Error("open requires a tool.");
+  if (
+    input.new !== undefined &&
+    (typeof input.new !== "boolean" || input.action !== "open" || input.tool !== "terminal")
+  )
+    throw new Error("new is a boolean and applies only to open tool=terminal.");
   if ((input.action === "select" || input.action === "close") && !input.tab_id)
     throw new Error("Select or close requires an exact tab_id from list.");
   if (input.action === "navigate" && !input.url) throw new Error("navigate requires a URL.");
@@ -150,7 +160,11 @@ export function decodeWorkbenchAgentResponse(value: unknown): WorkbenchAgentResp
   if (!input.state || typeof input.state !== "object" || Array.isArray(input.state))
     throw new Error("Missing workbench state.");
   const state = input.state as Record<string, unknown>;
-  if (typeof state.visible !== "boolean" || !Array.isArray(state.tabs) || state.tabs.length > 100)
+  if (
+    typeof state.visible !== "boolean" ||
+    !Array.isArray(state.tabs) ||
+    state.tabs.length > MAX_WORKBENCH_AGENT_TABS
+  )
     throw new Error("Invalid workbench state.");
   const selectedTabId = state.selectedTabId === null ? null : text(state.selectedTabId, 8192);
   const tabs = state.tabs.map((value: unknown) => {

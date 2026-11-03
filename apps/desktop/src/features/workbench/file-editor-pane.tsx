@@ -3,24 +3,20 @@ import type { WorkspaceRecord, WorktreeRecord } from "../../../contracts/desktop
 import type { PiDesktopApi, WorkspaceFilePreview } from "../../../contracts/ipc";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CloseIcon, CopyIcon, WorktreeIcon } from "../../ui/icons";
+import { CopyIcon, WorktreeIcon } from "../../ui/icons";
 import { HighlightedLine } from "../../ui/highlighted-line";
 import { MAX_HIGHLIGHTED_LINES, extensionToLanguage } from "../../ui/syntax-highlight";
-import {
-  breadcrumbSegments,
-  fileNameFromPath,
-  isMarkdownPath,
-  type FileLineMark,
-  type FileWorkbenchTabs,
-} from "./file-workbench-state";
+import { breadcrumbSegments, isMarkdownPath, type FileLineMark } from "./file-workbench-state";
 
 interface FileEditorPaneProps {
   readonly api: PiDesktopApi;
   readonly workspace: WorkspaceRecord;
   readonly worktree: WorktreeRecord | undefined;
-  readonly tabs: FileWorkbenchTabs;
-  readonly onActivate: (path: string) => void;
-  readonly onClose: (path: string) => void;
+  /** The one file this tab shows. */
+  readonly path: string;
+  /** A highlighted range in this file, if a link opened it at a line. */
+  readonly line: FileLineMark | null;
+  readonly lineNonce: number;
 }
 
 const FILE_MARKDOWN_COMPONENTS = {
@@ -49,23 +45,21 @@ export function FileEditorPane({
   api,
   workspace,
   worktree,
-  tabs,
-  onActivate,
-  onClose,
+  path: activePath,
+  line: lineMark,
+  lineNonce,
 }: FileEditorPaneProps) {
-  const activePath = tabs.active;
-  const lineMark = tabs.line;
   const [preview, setPreview] = useState<WorkspaceFilePreview | null>(null);
   const [viewerError, setViewerError] = useState<string | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
-  const [sourceMode, setSourceMode] = useState(() => tabs.line !== null);
-  const [sourceKey, setSourceKey] = useState(() => `${tabs.active ?? ""}:${tabs.lineNonce}`);
-  const nextSourceKey = `${activePath ?? ""}:${tabs.lineNonce}`;
+  const [sourceMode, setSourceMode] = useState(() => lineMark !== null);
+  const nextSourceKey = `${activePath}:${lineMark ? lineNonce : "none"}`;
+  const [sourceKey, setSourceKey] = useState(nextSourceKey);
   if (sourceKey !== nextSourceKey) {
     setSourceKey(nextSourceKey);
     setSourceMode(lineMark !== null);
   }
-  const markdown = activePath ? isMarkdownPath(activePath) : false;
+  const markdown = isMarkdownPath(activePath);
   const worktreeLabel =
     workspace.kind === "worktree"
       ? (worktree?.name ?? workspace.branchName ?? workspace.name)
@@ -73,12 +67,6 @@ export function FileEditorPane({
 
   useEffect(() => {
     let cancelled = false;
-    if (!activePath) {
-      setPreview(null);
-      setViewerError(null);
-      setViewerLoading(false);
-      return;
-    }
     setViewerLoading(true);
     setViewerError(null);
     void api
@@ -107,94 +95,19 @@ export function FileEditorPane({
   const showSource = !markdown || sourceMode;
 
   return (
-    <section className="file-editor" data-testid="file-editor" aria-label="Open file">
-      <div className="file-editor__tab-strip">
+    <section className="side-panel file-editor" data-testid="file-editor" aria-label="Open file">
+      <div className="file-editor__toolbar">
         {worktreeLabel ? (
           <span className="file-editor__worktree-chip" data-testid="file-editor-worktree-chip">
             <WorktreeIcon />
             <span>{worktreeLabel}</span>
           </span>
         ) : null}
-        <div className="file-editor__tabs">
-          {tabs.tabs.map((path) => {
-            const selected = path === activePath;
-            return (
-              <div
-                className={`file-editor__tab ${selected ? "file-editor__tab--active" : ""}`}
-                data-testid="file-workbench-tab"
-                key={path}
-              >
-                <button
-                  aria-current={selected ? "page" : undefined}
-                  className="file-editor__tab-button"
-                  type="button"
-                  onClick={() => onActivate(path)}
-                >
-                  {fileNameFromPath(path)}
-                </button>
-                <button
-                  aria-label={`Close ${fileNameFromPath(path)}`}
-                  className="file-editor__tab-close"
-                  type="button"
-                  onClick={() => onClose(path)}
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        {activePath ? (
-          <div className="file-editor__actions">
-            {markdown ? (
-              <button
-                aria-pressed={showSource}
-                className={
-                  showSource
-                    ? "file-workbench__mode file-workbench__mode--active"
-                    : "file-workbench__mode"
-                }
-                type="button"
-                onClick={() => setSourceMode((current) => !current)}
-              >
-                View source
-              </button>
-            ) : null}
-            <button
-              aria-label="Copy file"
-              className="icon-button"
-              disabled={!preview || preview.binary || Boolean(viewerError)}
-              type="button"
-              onClick={() => {
-                if (preview && !preview.binary) {
-                  void navigator.clipboard.writeText(preview.content).catch((error: unknown) => {
-                    console.error("[renderer] copy file failed", error);
-                  });
-                }
-              }}
-            >
-              <CopyIcon />
-            </button>
-            <button
-              className="file-workbench__mode"
-              disabled={!activePath}
-              type="button"
-              onClick={() => {
-                void api.revealWorkspaceFile(workspace.id, activePath).catch((error: unknown) => {
-                  setViewerError(error instanceof Error ? error.message : String(error));
-                });
-              }}
-            >
-              Open
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {activePath ? (
         <nav
           aria-label="File path"
           className="file-editor__breadcrumb"
           data-testid="file-editor-breadcrumb"
+          title={activePath}
         >
           {breadcrumbSegments(activePath).map((segment, index, segments) => (
             <span key={`${segment}-${index}`}>
@@ -205,7 +118,49 @@ export function FileEditorPane({
             </span>
           ))}
         </nav>
-      ) : null}
+        <div className="file-editor__actions">
+          {markdown ? (
+            <button
+              aria-pressed={showSource}
+              className={
+                showSource
+                  ? "file-workbench__mode file-workbench__mode--active"
+                  : "file-workbench__mode"
+              }
+              type="button"
+              onClick={() => setSourceMode((current) => !current)}
+            >
+              View source
+            </button>
+          ) : null}
+          <button
+            aria-label="Copy file"
+            className="icon-button"
+            disabled={!preview || preview.binary || Boolean(viewerError)}
+            type="button"
+            onClick={() => {
+              if (preview && !preview.binary) {
+                void navigator.clipboard.writeText(preview.content).catch((error: unknown) => {
+                  console.error("[renderer] copy file failed", error);
+                });
+              }
+            }}
+          >
+            <CopyIcon />
+          </button>
+          <button
+            className="file-workbench__mode"
+            type="button"
+            onClick={() => {
+              void api.revealWorkspaceFile(workspace.id, activePath).catch((error: unknown) => {
+                setViewerError(error instanceof Error ? error.message : String(error));
+              });
+            }}
+          >
+            Open
+          </button>
+        </div>
+      </div>
       <div className="file-editor__body">
         {renderEditorBody({
           activePath,
@@ -230,7 +185,7 @@ function renderEditorBody({
   viewerError,
   viewerLoading,
 }: {
-  readonly activePath: string | null;
+  readonly activePath: string;
   readonly lineMark: FileLineMark | null;
   readonly markdown: boolean;
   readonly preview: WorkspaceFilePreview | null;
@@ -238,9 +193,6 @@ function renderEditorBody({
   readonly viewerError: string | null;
   readonly viewerLoading: boolean;
 }): ReactNode {
-  if (!activePath) {
-    return <div className="diff-panel__empty">Select a file from the explorer.</div>;
-  }
   if (viewerLoading) {
     return <div className="diff-panel__empty">Loading file...</div>;
   }

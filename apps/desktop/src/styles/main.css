@@ -191,27 +191,19 @@
   height: 100%;
 }
 
-.file-workbench--split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .file-editor {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
 }
 
-.file-editor__tab-strip {
+.file-editor__toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 4px 8px 0;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -220,6 +212,7 @@
   align-items: center;
   gap: 4px;
   max-width: 140px;
+  flex: none;
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -237,58 +230,6 @@
   flex: 0 0 auto;
 }
 
-.file-editor__tabs {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  gap: 4px;
-  overflow-x: auto;
-}
-
-.file-editor__tab {
-  display: flex;
-  align-items: center;
-  max-width: 180px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-
-.file-editor__tab--active {
-  background: var(--surface-muted);
-  border-color: var(--border);
-}
-
-.file-editor__tab-button {
-  min-width: 0;
-  padding: 6px 8px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-editor__tab-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-right: 2px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-strong);
-}
-
-.file-editor__tab-close:hover {
-  background: var(--surface);
-}
-
 .file-editor__actions {
   display: flex;
   align-items: center;
@@ -298,13 +239,20 @@
 
 .file-editor__breadcrumb {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted-soft);
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.file-editor__breadcrumb > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-editor__breadcrumb-sep {
@@ -621,79 +569,24 @@
   background: var(--sidebar);
 }
 
-.terminal-panel__tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-}
-
-.terminal-panel__tab-item {
-  min-width: 112px;
-  max-width: 220px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 4px 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-}
-
-.terminal-panel__tab {
-  min-width: 0;
+.terminal-panel__cwd {
   flex: 1 1 auto;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
-  font-weight: 560;
-}
-
-.terminal-panel__tab-item--active {
-  border-color: var(--line);
-  background: var(--overlay-active);
-  color: var(--text-strong);
-}
-
-.terminal-panel__tab-title {
   min-width: 0;
   overflow: hidden;
+  color: var(--muted);
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.terminal-panel__tab-close {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--muted-subtle);
+.terminal-panel__exit {
+  flex: none;
+  color: var(--muted-strong);
+  font-size: 12px;
 }
 
-.terminal-panel__tab-close svg {
-  width: 13px;
-  height: 13px;
-}
-
-.terminal-panel__tab-close:hover {
-  background: var(--overlay-active);
-  color: var(--text-strong);
-}
-
-.terminal-panel__status {
+.workbench__terminal-status {
   flex-shrink: 0;
   width: 7px;
   height: 7px;
@@ -701,11 +594,11 @@
   background: var(--status-running);
 }
 
-.terminal-panel__status--exited {
+.workbench__terminal-status--exited {
   background: var(--status-neutral);
 }
 
-.terminal-panel__status--error {
+.workbench__terminal-status--error {
   background: var(--status-error);
 }
 

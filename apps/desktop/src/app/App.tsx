@@ -25,6 +25,7 @@ import { ComposerPanel } from "../features/conversation/composer-panel";
 import { DiffPanel } from "../features/workbench/diff-panel";
 import type { DiffPanelFileRequest } from "../features/workbench/diff-panel-types";
 import { FileWorkbench } from "../features/workbench/file-workbench";
+import { FileTabPanel, TerminalTabPanel } from "../features/workbench/workbench-tab-panels";
 import { useWorkbench } from "../features/workbench/use-workbench";
 import {
   ExtensionViewPanel,
@@ -64,7 +65,6 @@ import { SidebarToggleButton } from "../features/threads/sidebar-toggle-button";
 import { OpenInEditorButton } from "../features/threads/open-in-editor-button";
 import { useOpenInEditor } from "../features/threads/hooks/use-open-in-editor";
 import { Topbar } from "./topbar";
-import { TerminalPanel } from "../features/workbench/terminal-panel";
 import { ConversationTimeline } from "../features/conversation/conversation-timeline";
 import { ScheduledTasksView } from "../features/scheduled-tasks/scheduled-tasks-view";
 import {
@@ -921,7 +921,7 @@ export default function App() {
                 label: selectedWorktree?.name ?? selectedWorkspace.name,
                 openTabs:
                   workbench.view.files.workspaceId === selectedWorkspace.id
-                    ? workbench.view.files.tabs.tabs
+                    ? workbench.openFiles
                     : [],
               }
             : undefined
@@ -1352,10 +1352,10 @@ export default function App() {
             extensionViewsError={extensionViews.error}
             onReloadExtensionViews={extensionViews.reload}
             onOpenTool={workbench.openTool}
+            onNewTab={workbench.openNewTab}
             onActivateTool={workbench.activateTool}
             onCloseTool={workbench.closeTool}
-            onShowChooser={workbench.showChooser}
-            error={workbench.error || extensionHostActions.fileError}
+            error={workbench.error || workbench.terminalError || extensionHostActions.fileError}
             loading={!workbench.ready}
             onRetryRestore={workbench.retryRestore}
           >
@@ -1369,6 +1369,14 @@ export default function App() {
                 onPrepareTaskDraftPendingChange={
                   extensionHostActions.handlePrepareTaskDraftPendingChange
                 }
+              />
+            ) : activeTool?.kind === "file" ? (
+              <FileTabPanel
+                api={api}
+                workbench={workbench}
+                tool={activeTool}
+                workspace={filesWorkspace}
+                worktree={filesWorktree}
               />
             ) : activeTool && activeTool.kind !== "extension" ? (
               renderBuiltinToolPanel(activeTool.kind, {
@@ -1396,10 +1404,9 @@ export default function App() {
                     <FileWorkbench
                       key={selectedSessionKey}
                       api={api}
-                      onTabsChange={workbench.setFiles}
+                      onOpenFile={workbench.openFileTab}
+                      selectedPath={workbench.lastOpenedFile}
                       sessionStatus={selectedSession.status}
-                      tabs={workbench.view.files.tabs}
-                      worktree={filesWorktree}
                       workspace={filesWorkspace}
                     />
                   ) : (
@@ -1407,14 +1414,7 @@ export default function App() {
                       This file checkout is unavailable.
                     </p>
                   ),
-                terminal: () => (
-                  <TerminalPanel
-                    key={selectedSessionKey}
-                    workspace={selectedWorkspace}
-                    sessionId={selectedSession.id}
-                    onHide={() => workbench.closeTool("terminal")}
-                  />
-                ),
+                terminal: () => <TerminalTabPanel workbench={workbench} tool={activeTool} />,
               })
             ) : null}
           </Workbench>

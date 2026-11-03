@@ -37,6 +37,49 @@ test("workbench commands validate browser addresses and exact tab identities", (
     expect(() => decodeWorkbenchAgentCommand(input)).toThrow();
 });
 
+test("only open tool=terminal takes new, and only as a boolean", () => {
+  expect(decodeWorkbenchAgentCommand({ action: "open", tool: "terminal", new: true })).toEqual({
+    action: "open",
+    tool: "terminal",
+    new: true,
+  });
+  expect(decodeWorkbenchAgentCommand({ action: "open", tool: "files", path: "src/a.ts" })).toEqual({
+    action: "open",
+    tool: "files",
+    path: "src/a.ts",
+  });
+  for (const input of [
+    { action: "open", tool: "terminal", new: "true" },
+    { action: "open", tool: "browser", new: true },
+    { action: "list", new: true },
+  ])
+    expect(() => decodeWorkbenchAgentCommand(input)).toThrow(/new/);
+});
+
+test("acknowledgements carry one tab per file, page and terminal, up to 200", () => {
+  const tabs = [
+    ...Array.from({ length: 100 }, (_, index) => ({ id: `file:f${index}.ts`, title: `f${index}` })),
+    ...Array.from({ length: 8 }, (_, index) => ({ id: `terminal:t${index}`, title: "zsh" })),
+    ...Array.from({ length: 32 }, (_, index) => ({ id: `browser:p${index}`, title: "Page" })),
+  ];
+  expect(
+    decodeWorkbenchAgentResponse({
+      id: "request",
+      state: { visible: true, selectedTabId: "terminal:t0", tabs },
+    }).state?.tabs,
+  ).toHaveLength(140);
+  expect(() =>
+    decodeWorkbenchAgentResponse({
+      id: "request",
+      state: {
+        visible: true,
+        selectedTabId: null,
+        tabs: Array.from({ length: 201 }, (_, index) => ({ id: `file:${index}`, title: "x" })),
+      },
+    }),
+  ).toThrow();
+});
+
 test("workbench actions only accept acknowledgements from the originating chat and window", async () => {
   type Window = import("electron").BrowserWindow;
   type Owner = import("../../electron/windows/window-owner").WindowOwner;

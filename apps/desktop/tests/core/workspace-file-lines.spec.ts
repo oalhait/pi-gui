@@ -135,23 +135,29 @@ test("assistant file lines open in the Files panel and web links stay external",
     await assistant.getByRole("link", { name: "Docs" }).click();
     await expect.poll(openedExternalUrls).toEqual(["https://example.com/docs"]);
     expect(window.url()).toBe(appUrl);
-    await expect(window.getByTestId("file-workbench")).toHaveCount(0);
+    await expect(window.getByTestId("file-editor")).toHaveCount(0);
 
     await selectSidePanel(window, "Review");
     await expect(window.locator(".diff-panel")).toBeVisible();
     await fileButton(assistant, "missing.ts:2").click();
     await expect(window.locator(".diff-panel")).toBeVisible();
-    await expect(window.getByTestId("file-workbench")).toHaveCount(0);
+    await expect(window.getByTestId("file-editor")).toHaveCount(0);
 
+    // A line link opens the file in its own tab; the Files tree then reveals it.
     await fileButton(assistant, "src/app.ts:3").click();
-    await expect(window.getByTestId("file-workbench")).toBeVisible();
+    await expect(window.getByTestId("file-editor")).toBeVisible();
+    await expect(window.getByRole("tab", { name: "app.ts", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await expect(window.locator(".diff-panel")).toHaveCount(0);
-    const appRow = window.locator('.file-workbench__tree-row--file[data-file-path="src/app.ts"]');
-    await expect(appRow).toBeVisible();
-    await expect(appRow).toHaveClass(/file-workbench__tree-row--selected/);
     const lineThree = window.locator('[data-testid="file-line-mark"][data-line="3"]');
     await expect(lineThree).toHaveCount(1);
     await expect(lineThree).toContainText("marker-3");
+    await selectSidePanel(window, "Files");
+    const appRow = window.locator('.file-workbench__tree-row--file[data-file-path="src/app.ts"]');
+    await expect(appRow).toBeVisible();
+    await expect(appRow).toHaveClass(/file-workbench__tree-row--selected/);
 
     await appRow.click();
     await expect(window.getByTestId("file-line-mark")).toHaveCount(0);
@@ -190,6 +196,11 @@ test("assistant file lines open in the Files panel and web links stay external",
     await expectBoxInside(longMark, window.locator(".file-editor__body"));
 
     await fileButton(assistant, "nested/file-79.txt:1").click();
+    await expect(window.getByRole("tab", { name: "file-79.txt", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await selectSidePanel(window, "Files");
     const lastRow = window.locator(
       '.file-workbench__tree-row--file[data-file-path="nested/file-79.txt"]',
     );

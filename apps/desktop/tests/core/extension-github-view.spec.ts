@@ -9,6 +9,7 @@ import {
   type Page,
 } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   launchDesktop,
   makeUserDataDir,
@@ -83,9 +84,7 @@ async function recordOpenedLinks(app: ElectronApplication): Promise<() => Promis
 async function openGitHubView(window: Page): Promise<FrameLocator> {
   if (!(await window.getByTestId("workbench").isVisible()))
     await window.getByTestId("toggle-side-panel").click();
-  const chooser = window.getByTestId("workbench-chooser");
-  if (!(await chooser.isVisible())) await window.getByTestId("workbench-add-tab").click();
-  await chooser.getByRole("button", { name: "GitHub", exact: true }).click();
+  await chooseNewWorkbenchTab(window, "GitHub");
   await expectExtensionViewReady(window);
   return window.frameLocator('[data-testid="extension-view-frame"]');
 }

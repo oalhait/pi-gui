@@ -58,7 +58,16 @@ test("Ctrl or Cmd+W closes the focused Files, Review, or Terminal surface", asyn
 
     await selectSidePanel(window, "Files");
     await expect(files).toBeVisible();
+    // Opening a file from the tree gives it its own tab and keeps focus in the side panel.
     await files.locator(".file-workbench__tree-row--file").first().click();
+    const editor = window.getByTestId("file-editor");
+    await expect(editor).toBeVisible();
+    await expectFocusWithin(window, "[data-testid='workbench']");
+    await pressCloseShortcut(harness);
+    await expect(editor).toHaveCount(0);
+    await expect(files).toBeVisible();
+    await expect.poll(() => openWindowCount(harness)).toBe(1);
+    await files.getByTestId("file-workbench-filter").focus();
     await expectFocusWithin(window, "[data-testid='file-workbench']");
     await pressCloseShortcut(harness);
     await expect(files).toHaveCount(0);

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { desktopIpc } from "../../contracts/ipc";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   getDesktopState,
   launchDesktop,
@@ -48,8 +49,7 @@ test.afterAll(async () => {
 async function openBrowser(window: Page) {
   if (!(await window.getByTestId("workbench").isVisible()))
     await window.getByTestId("toggle-side-panel").click();
-  await window.getByRole("button", { name: "Add tab", exact: true }).click();
-  await window.getByRole("button", { name: "Browser", exact: true }).click();
+  await chooseNewWorkbenchTab(window, "Browser");
 }
 
 async function nativeState(harness: DesktopHarness) {
@@ -507,23 +507,24 @@ test("closing browser and other tool tabs selects and focuses the same flat-row 
     await expect(pageTab).toBeVisible();
     await openBrowser(window);
     await window.getByRole("button", { name: "Add tab", exact: true }).click();
-    await window.getByRole("button", { name: "Terminal", exact: true }).click();
+    await window.getByRole("menuitem", { name: "New terminal" }).click();
+    const terminal = window.locator('[role="tab"][data-testid^="workbench-tab-terminal:"]');
+    await expect(terminal).toHaveAttribute("aria-selected", "true");
     await window.getByRole("tab", { name: "New tab", exact: true }).click();
     await window.getByRole("button", { name: "Close New tab tab", exact: true }).click();
-    const terminal = window.getByRole("tab", { name: "Terminal", exact: true });
     await expect(terminal).toHaveAttribute("aria-selected", "true");
     await expect
       .poll(() =>
         window.evaluate(() => {
           const focused = document.activeElement;
           return (
-            focused?.getAttribute("data-testid") === "workbench-tab-terminal" ||
+            Boolean(focused?.getAttribute("data-testid")?.startsWith("workbench-tab-terminal:")) ||
             Boolean(focused?.closest('[data-testid="integrated-terminal"]'))
           );
         }),
       )
       .toBe(true);
-    await window.getByRole("button", { name: "Close Terminal tab", exact: true }).click();
+    await terminal.locator("..").locator(".workbench__tab-close").click();
     await expect(pageTab).toHaveAttribute("aria-selected", "true");
     await expect(pageTab).toBeFocused();
     await openBrowser(window);

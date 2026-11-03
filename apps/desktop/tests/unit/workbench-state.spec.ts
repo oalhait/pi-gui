@@ -5,13 +5,14 @@ import {
   toolRefId,
   type ToolRef,
 } from "../../contracts/workbench";
-import { openFileAtLine } from "../../src/features/workbench/file-workbench-state";
 import {
   activeWorkbenchTool,
   applyWorkbenchActions,
   initialWorkbenchView,
+  openFilePaths,
   reduceWorkbench,
   projectBrowserWorkbench,
+  projectTerminalWorkbench,
   workbenchCloseNeighbor,
   restoreWorkbenchView,
 } from "../../src/features/workbench/workbench-state";
@@ -58,12 +59,10 @@ test("close selects a neighbor, preserves inactive selection, and leaves a choos
   expect(decodeTaskWorkbenchTemplate(empty)).toEqual(empty);
 });
 
-test("hiding and tab switching retain file references and Changes selection", () => {
-  const initial = initialWorkbenchView("checkout");
-  const tabs = openFileAtLine(initial.files.tabs, "README.md", 5, 7);
-  let view = reduceWorkbench(initial, {
-    type: "set-files",
-    files: { workspaceId: "other-checkout", tabs },
+test("hiding and tab switching retain file tabs and Changes selection", () => {
+  let view = reduceWorkbench(initialWorkbenchView("checkout"), {
+    type: "open-file",
+    file: { workspaceId: "checkout", path: "README.md", line: 5, endLine: 7 },
   });
   view = reduceWorkbench(view, {
     type: "set-changes",
@@ -73,29 +72,70 @@ test("hiding and tab switching retain file references and Changes selection", ()
       selectedPath: "src/index.ts",
     },
   });
-  view = reduceWorkbench(view, { type: "open-tool", tool: { kind: "files" } });
   const hidden = reduceWorkbench(view, { type: "set-visibility", visibility: "hidden" });
   expect(hidden.tools).toBe(view.tools);
   expect(hidden.selection).toBe(view.selection);
   expect(hidden.files).toBe(view.files);
   const changes = reduceWorkbench(hidden, { type: "open-tool", tool: { kind: "changes" } });
   expect(changes.visibility).toBe("visible");
-  expect(changes.files.tabs).toBe(tabs);
+  expect(openFilePaths(changes)).toEqual(["README.md"]);
+  expect(changes.files.line).toEqual({ path: "README.md", start: 5, end: 7 });
   expect(changes.changes.selectedPath).toBe("src/index.ts");
-  const closedFiles = reduceWorkbench(changes, { type: "close-tool", toolId: "files" });
-  expect(closedFiles.files.tabs).toBe(tabs);
-  expect(decodeTaskWorkbenchTemplate(closedFiles)).toEqual(closedFiles);
+  expect(decodeTaskWorkbenchTemplate(changes)).toEqual(changes);
 });
 
-test("the chooser leaves tool order and state intact", () => {
-  const view = reduceWorkbench(initialWorkbenchView("checkout"), {
+test("each opened file is its own tab; reopening focuses it and closing removes only it", () => {
+  let view = reduceWorkbench(initialWorkbenchView("checkout"), {
     type: "open-tool",
-    tool: { kind: "terminal" },
+    tool: { kind: "files" },
   });
-  const chooser = reduceWorkbench(view, { type: "show-chooser" });
-  expect(chooser.tools).toBe(view.tools);
-  expect(chooser.selection).toEqual({ kind: "chooser" });
-  expect(reduceWorkbench(chooser, { type: "show-chooser" })).toBe(chooser);
+  for (const path of ["a.ts", "b.ts"])
+    view = reduceWorkbench(view, { type: "open-file", file: { workspaceId: "checkout", path } });
+  expect(view.tools.map(toolRefId)).toEqual(["changes", "files", "file:a.ts", "file:b.ts"]);
+  expect(view.selection).toEqual({ kind: "tool", toolId: "file:b.ts" });
+  const refocused = reduceWorkbench(view, {
+    type: "open-file",
+    file: { workspaceId: "checkout", path: "a.ts" },
+  });
+  expect(refocused.tools).toBe(view.tools);
+  expect(refocused.selection).toEqual({ kind: "tool", toolId: "file:a.ts" });
+  // A line link marks that file; opening it again without a line clears the mark.
+  const marked = reduceWorkbench(refocused, {
+    type: "open-file",
+    file: { workspaceId: "checkout", path: "b.ts", line: 3 },
+  });
+  expect(marked.files).toEqual({
+    workspaceId: "checkout",
+    line: { path: "b.ts", start: 3, end: 3 },
+    lineNonce: 1,
+  });
+  expect(
+    reduceWorkbench(marked, { type: "open-file", file: { workspaceId: "checkout", path: "a.ts" } })
+      .files.line,
+  ).toEqual(marked.files.line);
+  expect(
+    reduceWorkbench(marked, { type: "open-file", file: { workspaceId: "checkout", path: "b.ts" } })
+      .files.line,
+  ).toBeNull();
+  const closed = reduceWorkbench(marked, { type: "close-tool", toolId: "file:b.ts" });
+  expect(closed.tools.map(toolRefId)).toEqual(["changes", "files", "file:a.ts"]);
+  expect(closed.selection).toEqual({ kind: "tool", toolId: "file:a.ts" });
+  expect(closed.files.line).toBeNull();
+  expect(decodeTaskWorkbenchTemplate(closed)).toEqual(closed);
+});
+
+test("opening a file from another checkout replaces the previous checkout's file tabs", () => {
+  let view = reduceWorkbench(initialWorkbenchView("checkout"), {
+    type: "open-file",
+    file: { workspaceId: "checkout", path: "a.ts", line: 2 },
+  });
+  view = reduceWorkbench(view, { type: "open-tool", tool: { kind: "terminal" } });
+  const other = reduceWorkbench(view, {
+    type: "open-file",
+    file: { workspaceId: "worktree", path: "b.ts" },
+  });
+  expect(other.tools.map(toolRefId)).toEqual(["changes", "terminal", "file:b.ts"]);
+  expect(other.files).toEqual({ workspaceId: "worktree", line: null, lineNonce: 1 });
 });
 
 test("saved extension references retain their own identity without a registered frontend", () => {
@@ -120,26 +160,31 @@ test("restore rebases early explicit actions without losing saved tools or docum
     { type: "open-tool", tool: { kind: "terminal" } },
     { type: "open-file", file: { workspaceId: "checkout", path: "early-link.ts", line: 5 } },
   ]);
-  expect(live.tools.map(toolRefId)).toEqual(["changes", "files", "terminal"]);
-  expect(live.files.tabs.tabs).toEqual(["saved.ts", "early-link.ts"]);
-  expect(live.files.tabs.active).toBe("early-link.ts");
+  expect(live.tools.map(toolRefId)).toEqual([
+    "changes",
+    "file:saved.ts",
+    "terminal",
+    "file:early-link.ts",
+  ]);
+  expect(live.selection).toEqual({ kind: "tool", toolId: "file:early-link.ts" });
   // A second window can load the durable template without mutating the first window's value.
   const secondWindow = restoreWorkbenchView(initialWorkbenchView("checkout"), saved, []).view;
-  const editedSecond = reduceWorkbench(secondWindow, { type: "close-tool", toolId: "files" });
+  const editedSecond = reduceWorkbench(secondWindow, {
+    type: "close-tool",
+    toolId: "file:saved.ts",
+  });
   expect(editedSecond.tools).toEqual([{ kind: "changes" }]);
-  expect(saved.tools).toEqual([{ kind: "changes" }, { kind: "files" }]);
+  expect(saved.tools).toEqual([{ kind: "changes" }, { kind: "file", path: "saved.ts" }]);
 });
 
-test("the file limit preserves existing references and reports blocked appends during restore", () => {
+test("file tabs and other tabs have separate limits that keep existing references", () => {
   const initial = initialWorkbenchView("checkout");
   const paths = Array.from({ length: MAX_WORKBENCH_FILE_TABS }, (_, index) => `file-${index}.ts`);
-  const full = reduceWorkbench(initial, {
-    type: "set-files",
-    files: {
-      workspaceId: "checkout",
-      tabs: { ...initial.files.tabs, tabs: paths, active: paths[0] ?? null },
-    },
-  });
+  const full = applyWorkbenchActions(
+    initial,
+    paths.map((path) => ({ type: "open-file", file: { workspaceId: "checkout", path } })),
+  ).view;
+  expect(openFilePaths(full)).toHaveLength(MAX_WORKBENCH_FILE_TABS);
   const action = {
     type: "open-file",
     file: { workspaceId: "checkout", path: "one-too-many.ts" },
@@ -153,7 +198,48 @@ test("the file limit preserves existing references and reports blocked appends d
     { type: "open-file", file: { workspaceId: "checkout", path: "file-0.ts" } },
   ]);
   expect(existing.error).toBe("");
-  expect(existing.view.files.tabs.tabs).toHaveLength(MAX_WORKBENCH_FILE_TABS);
+  expect(existing.view.selection).toEqual({ kind: "tool", toolId: "file:file-0.ts" });
+  // Files do not count against the tool limit.
+  const terminal = applyWorkbenchActions(full, [{ type: "open-tool", tool: { kind: "terminal" } }]);
+  expect(terminal.error).toBe("");
+  expect(terminal.view.tools).toHaveLength(MAX_WORKBENCH_FILE_TABS + 2);
+  expect(decodeTaskWorkbenchTemplate(terminal.view)).toEqual(terminal.view);
+});
+
+test("terminals project into one tab each without changing the saved slot", () => {
+  const saved = reduceWorkbench(initialWorkbenchView("checkout"), {
+    type: "open-tool",
+    tool: { kind: "terminal" },
+  });
+  expect(projectTerminalWorkbench(saved, undefined)).toBe(saved);
+  expect(projectTerminalWorkbench(saved, { activeSessionId: "", sessions: [] })).toBe(saved);
+  const session = (id: string) => ({
+    id,
+    workspaceId: "checkout",
+    cwd: "/repo",
+    shell: "/bin/zsh",
+    title: id,
+    status: "running" as const,
+    replay: "",
+    truncated: false,
+  });
+  const live = projectTerminalWorkbench(saved, {
+    activeSessionId: "t2",
+    sessions: [session("t1"), session("t2")],
+  });
+  expect(live.tools.map(toolRefId)).toEqual(["changes", "terminal:t1", "terminal:t2"]);
+  expect(live.selection).toEqual({ kind: "tool", toolId: "terminal:t2" });
+  expect(saved.tools.map(toolRefId)).toEqual(["changes", "terminal"]);
+  expect(decodeTaskWorkbenchTemplate(saved)).toEqual(saved);
+  expect(workbenchCloseNeighbor(live, "terminal:t2")).toBe("terminal:t1");
+  const other = projectTerminalWorkbench(
+    { ...saved, selection: { kind: "tool", toolId: "changes" } },
+    { activeSessionId: "t2", sessions: [session("t1"), session("t2")] },
+  );
+  expect(other.selection).toEqual({ kind: "tool", toolId: "changes" });
+  expect(() =>
+    decodeTaskWorkbenchTemplate({ ...saved, tools: live.tools, selection: live.selection }),
+  ).toThrow(/builtin tool fields|unsupported field/);
 });
 
 test("browser pages project into the tool row without changing the saved placement", () => {

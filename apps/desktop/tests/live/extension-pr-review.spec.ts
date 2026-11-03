@@ -2,7 +2,12 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { getRealAuthConfig, launchDesktop, makeWorkspace } from "../helpers/electron-app";
+import {
+  chooseNewWorkbenchTab,
+  getRealAuthConfig,
+  launchDesktop,
+  makeWorkspace,
+} from "../helpers/electron-app";
 import {
   createExamplePrFixture,
   desktopExtensionExamplesDirectory,
@@ -103,11 +108,7 @@ test("a real provider records PR findings through the installed extension and pr
       const tab = window.getByRole("tab", { name: "PR Review", exact: true });
       if (await tab.count()) await tab.click();
       else {
-        await window.getByTestId("workbench-add-tab").click();
-        await window
-          .getByTestId("workbench-chooser")
-          .getByRole("button", { name: "PR Review", exact: true })
-          .click();
+        await chooseNewWorkbenchTab(window, "PR Review");
       }
       return window.frameLocator('[data-testid="extension-view-frame"]');
     };
@@ -135,7 +136,7 @@ test("a real provider records PR findings through the installed extension and pr
       contentType: "image/png",
     });
     await frame.getByRole("button", { name: "search.ts:1", exact: true }).first().click();
-    await expect(window.getByTestId("file-workbench")).toBeVisible();
+    await expect(window.getByTestId("file-editor")).toBeVisible();
     frame = await openReview();
     await frame.getByRole("button", { name: "Prepare fix task", exact: true }).first().click();
     await expect(window.getByTestId("composer")).toHaveValue(

@@ -497,6 +497,12 @@ contextBridge.exposeInMainWorld("piApp", {
       terminalScopeId,
       size,
     ) as Promise<TerminalPanelSnapshot>,
+  getTerminalPanel: (workspaceId: string, terminalScopeId: string) =>
+    ipcRenderer.invoke(
+      desktopIpc.terminalGetPanel,
+      workspaceId,
+      terminalScopeId,
+    ) as Promise<TerminalPanelSnapshot | null>,
   createTerminalSession: (
     workspaceId: string,
     terminalScopeId: string,

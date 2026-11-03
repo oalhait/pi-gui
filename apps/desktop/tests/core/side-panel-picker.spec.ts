@@ -27,13 +27,16 @@ test("one icon and keyboard shortcuts toggle the selected workspace tool", async
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveText("");
     await toggle.click();
-    const chooser = window.getByTestId("workbench-chooser");
-    if (!(await chooser.isVisible())) await window.getByTestId("workbench-add-tab").click();
+    await window.getByTestId("workbench-add-tab").click();
+    const menu = window.getByTestId("workbench-new-tab-menu");
     const modifierLabel = process.platform === "darwin" ? "⌘" : "Ctrl+";
-    const tile = (name: string) => chooser.getByRole("button", { name, exact: true });
-    await expect(tile("Review").locator("kbd")).toHaveText(`${modifierLabel}R`);
-    await expect(tile("Terminal").locator("kbd")).toHaveText(`${modifierLabel}J`);
-    await expect(tile("Files").locator("kbd")).toHaveCount(0);
+    const item = (name: string) => menu.getByRole("menuitem", { name });
+    await expect(item("Review").locator("kbd")).toHaveText(`${modifierLabel}R`);
+    // The Terminal chord focuses the latest terminal; New terminal always adds one.
+    await expect(item("New terminal").locator("kbd")).toHaveCount(0);
+    await expect(item("Files").locator("kbd")).toHaveCount(0);
+    await window.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
     await selectSidePanel(window, "Files");
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
 

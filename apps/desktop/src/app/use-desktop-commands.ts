@@ -138,7 +138,8 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
     if (!sidePanelAvailable) return;
     if (
       sidePanelVisible &&
-      (selectedToolId === kind || (kind === "browser" && selectedToolId?.startsWith("browser:")))
+      (selectedToolId === kind ||
+        ((kind === "browser" || kind === "terminal") && selectedToolId?.startsWith(`${kind}:`)))
     )
       workbench.setVisibility("hidden");
     else workbench.openTool({ kind });
@@ -146,7 +147,7 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
   const toggleSidePanel = () => {
     if (sidePanelAvailable) workbench.toggleVisibility();
   };
-  /** Does what the side panel's Add tab button does, then focuses the first choice. */
+  /** Opens the side panel's Add tab menu, which focuses its first choice. */
   const newSidePanelTab = () => {
     // An open dialog keeps focus; the chooser would open behind it. The palette
     // is the exception: any other command closes it first.
@@ -154,10 +155,16 @@ export function useDesktopCommands(input: DesktopCommandsInput) {
       "[aria-modal='true']:not(.command-palette), .extension-dialog-backdrop",
     );
     if (!sidePanelAvailable || !workbench.ready || dialogOpen) return false;
-    // Render the chooser now so its first choice can take focus in this press.
+    // Render the panel and its menu now so the first choice can take focus in this press.
     // A frame callback would not run while the window is hidden.
-    flushSync(() => workbench.showChooser());
-    document.querySelector<HTMLElement>('[data-testid="workbench-chooser"] button')?.focus();
+    if (workbench.view.visibility !== "visible")
+      flushSync(() => workbench.setVisibility("visible"));
+    const add = document.querySelector<HTMLButtonElement>('[data-testid="workbench-add-tab"]');
+    if (!add) return false;
+    if (add.getAttribute("aria-expanded") !== "true") flushSync(() => add.click());
+    document
+      .querySelector<HTMLElement>('[data-testid="workbench-new-tab-menu"] [role="menuitem"]')
+      ?.focus();
     return true;
   };
   const selectSidePanelTab = (index: number) => {

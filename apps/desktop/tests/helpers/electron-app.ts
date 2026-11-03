@@ -1784,6 +1784,22 @@ export async function waitForTimelineLayout(window: Page): Promise<void> {
   await expect(window.getByTestId("timeline-pane")).toHaveAttribute("data-layout", "settled");
 }
 
+/**
+ * Opens one more side panel tab from the tab row's Add tab menu, or from the chooser when no
+ * tab is open. Browser and Terminal always add a new page or terminal.
+ */
+export async function chooseNewWorkbenchTab(window: Page, name: string): Promise<void> {
+  const chooser = window.getByTestId("workbench-chooser");
+  if (await chooser.isVisible()) {
+    await chooser.getByRole("button", { name, exact: true }).click();
+    return;
+  }
+  await window.getByTestId("workbench-add-tab").click();
+  const label =
+    name === "Browser" ? "New browser page" : name === "Terminal" ? "New terminal" : name;
+  await window.getByTestId("workbench-new-tab-menu").getByRole("menuitem", { name: label }).click();
+}
+
 export async function selectSidePanel(
   window: Page,
   choice: "Files" | "Review" | "Terminal",
@@ -1792,15 +1808,23 @@ export async function selectSidePanel(
   if (!(await workbench.isVisible())) {
     await window.getByTestId("toggle-side-panel").click();
   }
+  if (choice === "Terminal") {
+    // Each terminal is its own tab, titled by its shell; focus the first or start one.
+    const terminals = workbench.locator('[role="tab"][data-testid^="workbench-tab-terminal"]');
+    if (await terminals.count()) await terminals.first().click();
+    else await chooseNewWorkbenchTab(window, choice);
+    await expect(
+      workbench.locator(
+        '[role="tab"][aria-selected="true"][data-testid^="workbench-tab-terminal"]',
+      ),
+    ).toHaveCount(1);
+    return;
+  }
   const existing = workbench.getByRole("tab", { name: choice, exact: true });
   if (await existing.count()) {
     await existing.click();
   } else {
-    const chooser = window.getByTestId("workbench-chooser");
-    if (!(await chooser.isVisible())) {
-      await window.getByTestId("workbench-add-tab").click();
-    }
-    await chooser.getByRole("button", { name: choice, exact: true }).click();
+    await chooseNewWorkbenchTab(window, choice);
   }
   await expect(existing).toHaveAttribute("aria-selected", "true");
 }

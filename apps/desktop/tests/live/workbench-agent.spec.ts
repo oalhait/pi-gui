@@ -210,7 +210,7 @@ test("a real agent captures the side pane browser when asked what is in it", asy
     if (!(await window.getByTestId("workbench").isVisible()))
       await window.getByTestId("toggle-side-panel").click();
     await window.getByRole("button", { name: "Add tab", exact: true }).click();
-    await window.getByRole("button", { name: "Browser", exact: true }).click();
+    await window.getByRole("menuitem", { name: "New browser page" }).click();
     const address = window.getByRole("textbox", { name: "Browser address" });
     await address.fill(url);
     await address.press("Enter");

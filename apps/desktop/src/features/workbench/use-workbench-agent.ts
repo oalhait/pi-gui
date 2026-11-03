@@ -9,30 +9,31 @@ import {
   type WorkbenchCaptureTarget,
 } from "../../../contracts/workbench-agent";
 import { workbenchToolLabel } from "./workbench";
-import type { useBrowserWorkbench } from "./use-browser-workbench";
+import type { useTerminalWorkbench } from "./use-terminal-workbench";
 
-type Workbench = ReturnType<typeof useBrowserWorkbench>;
+type Workbench = ReturnType<typeof useTerminalWorkbench>;
+
+function terminalSession(workbench: Workbench, tool: ToolRef) {
+  return tool.kind === "terminal"
+    ? workbench.terminalSessions.find((session) => session.id === tool.sessionId)
+    : undefined;
+}
 
 /** A short text companion to a pane capture; never file or terminal contents. */
-function describeTool(tool: Exclude<ToolRef, { kind: "browser" }>, view: Workbench["view"]) {
+function describeTool(tool: Exclude<ToolRef, { kind: "browser" }>, workbench: Workbench) {
+  const view = workbench.view;
   switch (tool.kind) {
-    case "files": {
-      const files = view.files.tabs;
-      if (!files.active) return "No file is open.";
-      const others = files.tabs.length > 1 ? ` (${files.tabs.length} file tabs open)` : "";
-      return `Open file: ${files.active}${others}`;
-    }
+    case "files":
+      return "File explorer";
+    case "file":
+      return `Open file: ${tool.path}`;
     case "changes": {
       const selected = view.changes.selectedPath;
       return `Review scope: ${view.changes.scope.kind}${selected ? `; selected file: ${selected}` : ""}`;
     }
     case "terminal": {
-      const title = document
-        .querySelector(
-          '[data-testid="terminal-tab"][aria-selected="true"] .terminal-panel__tab-title',
-        )
-        ?.textContent?.trim();
-      return `Terminal: ${title || "no session"}`;
+      const session = terminalSession(workbench, tool);
+      return session ? `Terminal: ${session.title} in ${session.cwd}` : "Terminal: no session";
     }
     case "extension":
       return `Extension view ${tool.extensionId}/${tool.viewId}`;
@@ -109,9 +110,13 @@ export function useWorkbenchAgent(
             tool.kind === "browser"
               ? value.browserState?.tabs.find((tab) => tab.id === tool.pageId)
               : undefined;
+          const title =
+            page?.title ??
+            terminalSession(value, tool)?.title ??
+            (tool.kind === "file" ? tool.path : workbenchToolLabel(tool));
           return {
             id: toolRefId(tool),
-            title: (page?.title ?? workbenchToolLabel(tool)).slice(0, 200),
+            title: title.slice(0, 200),
             ...(page ? { url: page.url } : {}),
           };
         }),
@@ -129,13 +134,18 @@ export function useWorkbenchAgent(
         if (!tool.pageId) throw new Error("This browser tab has no page yet.");
         return { kind: "browser", tabId: id, pageId: tool.pageId, selected };
       }
-      const description = describeTool(tool, value.view);
+      const description = describeTool(tool, value);
       const pane = selected ? document.querySelector('[data-testid="workbench"]') : null;
       const box = pane?.getBoundingClientRect();
       const base = {
         kind: "pane" as const,
         tabId: id,
-        tool: tool.kind === "changes" ? ("review" as const) : tool.kind,
+        tool:
+          tool.kind === "changes"
+            ? ("review" as const)
+            : tool.kind === "file"
+              ? ("files" as const)
+              : tool.kind,
         title: workbenchToolLabel(tool).slice(0, 200),
         description: description.slice(0, 2000),
       };
@@ -249,6 +259,32 @@ export function useWorkbenchAgent(
               { workspaceId: request.target.workspaceId, path: command.path },
               () => checkTarget(request),
             );
+            const id = toolRefId({ kind: "file", path: command.path });
+            await waitFor(
+              request,
+              (next) =>
+                next.view.visibility === "visible" &&
+                next.view.selection.kind === "tool" &&
+                next.view.selection.toolId === id,
+            );
+            break;
+          } else if (command.tool === "terminal") {
+            // The most recently used terminal, or a first one; new=true always adds a tab.
+            const created = command.new ? await value.newTerminal() : undefined;
+            checkTarget(request);
+            if (!created) value.openTool({ kind: "terminal" });
+            await waitFor(request, (next) => {
+              const starting = next.activeTool?.kind === "terminal" && !next.activeTool.sessionId;
+              if (starting && next.terminalError) throw new Error(next.terminalError);
+              return (
+                next.view.visibility === "visible" &&
+                next.activeTool?.kind === "terminal" &&
+                (created
+                  ? next.activeTool.sessionId === created
+                  : Boolean(next.activeTool.sessionId))
+              );
+            });
+            break;
           } else {
             value.openTool(
               command.tool === "extension"

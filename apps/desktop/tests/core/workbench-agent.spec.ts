@@ -114,6 +114,69 @@ test("the agent opens browser pages and manages the side pane without desktop pe
   }
 });
 
+test("agent tab IDs map one to one onto file, terminal and browser tabs", async () => {
+  test.setTimeout(60_000);
+  const workspace = await makeWorkspace("agent-single-tabs");
+  await writeFile(join(workspace, "one.txt"), "First agent file");
+  await writeFile(join(workspace, "two.txt"), "Second agent file");
+  const harness = await launchDesktop(await makeUserDataDir(), {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Agent single tabs");
+    const snapshot = await getDesktopState(window);
+    const target = {
+      workspaceId: snapshot.selectedWorkspaceId,
+      sessionId: snapshot.selectedSessionId,
+    };
+    const ids = async () =>
+      (await run(harness, target, { action: "list" })).tabs.map((tab) => tab.id);
+
+    // Two files are two tabs; opening one again focuses it.
+    await run(harness, target, { action: "open", tool: "files", path: "one.txt" });
+    const second = await run(harness, target, { action: "open", tool: "files", path: "two.txt" });
+    expect(second.selectedTabId).toBe("file:two.txt");
+    expect(second.tabs.find((tab) => tab.id === "file:one.txt")?.title).toBe("one.txt");
+    await expect(window.getByTestId("file-workbench-preview")).toContainText("Second agent file");
+    const again = await run(harness, target, { action: "open", tool: "files", path: "one.txt" });
+    expect(again.selectedTabId).toBe("file:one.txt");
+    expect(again.tabs.filter((tab) => tab.id.startsWith("file:"))).toHaveLength(2);
+    await expect(window.getByTestId("file-workbench-preview")).toContainText("First agent file");
+    // open tool=files without a path is the explorer, a tab of its own.
+    expect((await run(harness, target, { action: "open", tool: "files" })).selectedTabId).toBe(
+      "files",
+    );
+
+    // Terminals: open focuses the latest or starts one; new=true always adds a tab.
+    const first = await run(harness, target, { action: "open", tool: "terminal" });
+    const firstTerminal = first.selectedTabId!;
+    expect(firstTerminal).toMatch(/^terminal:/);
+    const added = await run(harness, target, { action: "open", tool: "terminal", new: true });
+    expect(added.selectedTabId).toMatch(/^terminal:/);
+    expect(added.selectedTabId).not.toBe(firstTerminal);
+    expect(added.tabs.filter((tab) => tab.id.startsWith("terminal:"))).toHaveLength(2);
+    await run(harness, target, { action: "select", tab_id: "file:two.txt" });
+    expect((await run(harness, target, { action: "open", tool: "terminal" })).selectedTabId).toBe(
+      added.selectedTabId,
+    );
+    await expect(
+      window.locator('[role="tab"][data-testid^="workbench-tab-terminal:"]'),
+    ).toHaveCount(2);
+
+    // Closing a tab closes exactly that one thing.
+    await run(harness, target, { action: "close", tab_id: added.selectedTabId! });
+    await run(harness, target, { action: "close", tab_id: "file:one.txt" });
+    expect(await ids()).toEqual(["changes", "file:two.txt", "files", firstTerminal]);
+    await expect(
+      window.locator('[role="tab"][data-testid^="workbench-tab-terminal:"]'),
+    ).toHaveCount(1);
+  } finally {
+    await harness.close();
+  }
+});
+
 async function holdReply(harness: DesktopHarness, channel: string, kind?: string) {
   await harness.electronApp.evaluate(
     ({ ipcMain }, input) => {
@@ -196,6 +259,7 @@ test("cancelling while a file read is pending prevents the delayed file-tab muta
     expect((await pending).error).toContain("cancelled");
     await expect(window.getByTestId("file-workbench")).toHaveCount(0);
     await expect(window.getByRole("tab", { name: "Files", exact: true })).toHaveCount(0);
+    await expect(window.locator('[data-testid^="workbench-tab-file:"]')).toHaveCount(0);
   } finally {
     await releaseGate(harness);
     await harness.close();
@@ -374,7 +438,7 @@ test("capture returns the browser page itself, read-only, and explains hidden or
     await run(harness, target, { action: "open", tool: "files", path: "notes.md" });
     await expect(window.getByTestId("file-workbench-preview")).toContainText("Captured notes");
     const files = await capture(harness, target);
-    expect(files.details).toMatchObject({ kind: "files", tab_id: "files" });
+    expect(files.details).toMatchObject({ kind: "files", tab_id: "file:notes.md" });
     expect(String(files.details.description)).toContain("notes.md");
     const filePixels = await inspectImage(harness, files);
     expect(filePixels?.width).toBeGreaterThan(100);
@@ -382,10 +446,10 @@ test("capture returns the browser page itself, read-only, and explains hidden or
     // A non-selected pane tab is described but not selected or captured.
     const browserById = await capture(harness, target, blankId);
     expect(browserById.details).toMatchObject({ url, visible_to_user: false });
-    expect((await run(harness, target, { action: "list" })).selectedTabId).toBe("files");
+    expect((await run(harness, target, { action: "list" })).selectedTabId).toBe("file:notes.md");
     const listedTerminal = await run(harness, target, { action: "open", tool: "terminal" });
-    expect(listedTerminal.selectedTabId).toBe("terminal");
-    const filesById = await capture(harness, target, "files");
+    expect(listedTerminal.selectedTabId).toMatch(/^terminal:/);
+    const filesById = await capture(harness, target, "file:notes.md");
     expect(filesById.content.some((entry) => entry.type === "image")).toBe(false);
     expect(String(filesById.details.note)).toContain("not the selected");
     expect((await capture(harness, target, "missing")).details.error).toContain("Unknown tab_id");

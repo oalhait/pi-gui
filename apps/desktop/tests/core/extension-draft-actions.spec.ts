@@ -52,9 +52,9 @@ export default function extension(pi) {
       await window.getByTestId("toggle-side-panel").click();
     await window.getByTestId("workbench-add-tab").click();
     const choice = window
-      .getByTestId("workbench-chooser")
-      .getByRole("button", { name: "Draft actions", exact: true });
-    // The chooser and tab show the view's title, never the internal extension hash.
+      .getByTestId("workbench-new-tab-menu")
+      .getByRole("menuitem", { name: "Draft actions", exact: true });
+    // The Add tab menu and tab show the view's title, never the internal extension hash.
     await expect(choice).toHaveText("Draft actions");
     await choice.click();
     const frame = window.frameLocator('[data-testid="extension-view-frame"]');

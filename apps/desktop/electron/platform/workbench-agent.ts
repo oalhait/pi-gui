@@ -141,7 +141,7 @@ export function createWorkbenchAgentTool(
       'When the user refers to what is in the browser, browser view, preview, side pane or sidebar ("what\'s in my browser", "look at this page"), call workbench action=capture. It returns a screenshot of just that page with its url and title. Do not take full-window or desktop screenshots, or use OS/desktop automation, to see pi-gui\'s side pane.',
       "Use workbench action=read for a browser page's exact text, links or form fields (long pages, copying text, finding a URL); add format=html only when the markup itself matters. Use capture when layout or visuals matter.",
       "Use workbench action=open tool=browser url=... when asked to show a page or preview in pi-gui. Do not ask the user to paste a URL or use OS automation for the side pane.",
-      "Use list to obtain exact tab_id values before selecting, closing, navigating, capturing or reading a tab other than the selected one. capture and read are read-only: it never changes tabs or visibility. Browser opens create a new top-level page; navigate changes an existing browser page.",
+      "Use list to obtain exact tab_id values before selecting, closing, navigating, capturing or reading a tab other than the selected one. capture and read are read-only: it never changes tabs or visibility. Each tab is one thing: one browser page, one file (tab_id file:<path>) or one terminal (terminal:<id>). Browser opens create a new top-level page; navigate changes an existing browser page. open tool=files path=... opens or focuses that file's tab; open tool=terminal focuses the most recent terminal (starting one if none) and new=true always starts another.",
       "Only the requesting chat's pane is controlled. If this chat is not visible, ask the user to open it rather than changing a different chat.",
     ],
     parameters: {
@@ -172,7 +172,14 @@ export function createWorkbenchAgentTool(
             "Exact top-level tab ID returned by list. capture and read default to the selected tab.",
         },
         url: { type: "string", description: "HTTP/HTTPS URL or localhost address." },
-        path: { type: "string", description: "Workspace-relative file to show in Files." },
+        path: {
+          type: "string",
+          description: "open tool=files only: workspace-relative file to open in its own tab.",
+        },
+        new: {
+          type: "boolean",
+          description: "open tool=terminal only: start another terminal tab.",
+        },
         extension_id: { type: "string" },
         view_id: { type: "string" },
         format: {
