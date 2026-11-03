@@ -3,6 +3,7 @@ import {
   session,
   WebContentsView,
   type BrowserWindow,
+  type NativeImage,
   type Session,
   type WebContents,
   type Input,
@@ -63,9 +64,31 @@ interface Host {
   layout?: BrowserLayout;
   visibleTab?: Tab;
 }
+export interface BrowserPageCapture {
+  readonly url: string;
+  readonly title: string;
+  readonly loading: boolean;
+  readonly error?: string;
+  readonly viewport: { readonly width: number; readonly height: number };
+  /** The page's native view is currently presented in the side pane. */
+  readonly shown: boolean;
+  readonly image?: NativeImage;
+  readonly unavailable?: string;
+}
 interface SavedRoot {
   readonly urls: readonly string[];
   readonly active: number;
+}
+
+const owners = new WeakMap<WindowOwner, BrowserOwner>();
+/** The one lazily created browser owner for these windows, shared by IPC and agent capture. */
+export function browserOwnerFor(windows: WindowOwner): BrowserOwner {
+  let owner = owners.get(windows);
+  if (!owner) {
+    owner = new BrowserOwner(windows);
+    owners.set(windows, owner);
+  }
+  return owner;
 }
 
 export class BrowserOwner {
@@ -218,6 +241,47 @@ export class BrowserOwner {
     this.save(host, root);
     this.publish(host, root);
     return this.nextSnapshot(root);
+  }
+
+  /**
+   * Read-only snapshot of one of a chat's pages, captured from the page's own contents so the
+   * window can be in the background or covered. Never changes tabs, selection or visibility.
+   */
+  async capturePage(
+    window: BrowserWindow,
+    target: BrowserMount["target"],
+    pageId: string,
+  ): Promise<BrowserPageCapture> {
+    const host = this.hosts.get(window.webContents.id);
+    const root = host?.roots.get(JSON.stringify([target.workspaceId, target.sessionId]));
+    const tab = root?.tabs.find((entry) => entry.id === pageId);
+    if (!host || !root || !tab || tab.view.webContents.isDestroyed())
+      throw new Error("This browser page is not loaded in this chat's side pane.");
+    const contents = tab.view.webContents;
+    const bounds = tab.view.getBounds();
+    const page = {
+      url: tab.url,
+      title: tab.url === "about:blank" ? "New tab" : contents.getTitle() || "New tab",
+      loading: contents.isLoading(),
+      ...(tab.error ? { error: tab.error } : {}),
+      viewport: { width: bounds.width, height: bounds.height },
+      shown: host.root === root && host.visibleTab === tab && Boolean(host.layout?.visible),
+    };
+    if (tab.error) return { ...page, unavailable: `The page failed to load: ${tab.error}` };
+    if (tab.url === "about:blank")
+      return { ...page, unavailable: "The browser tab is blank (about:blank)." };
+    if (contents.isCrashed())
+      return { ...page, unavailable: "The page stopped responding. Reload it first." };
+    if (bounds.width <= 0 || bounds.height <= 0)
+      return {
+        ...page,
+        unavailable:
+          "This page has not been shown in the side pane yet, so it has no rendered viewport. Select its tab first.",
+      };
+    const image = await contents.capturePage(undefined, { stayHidden: true });
+    if (image.isEmpty())
+      return { ...page, unavailable: "The page has not rendered any content yet." };
+    return { ...page, image };
   }
 
   private assertTarget(window: BrowserWindow, mount: BrowserMount): void {

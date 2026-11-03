@@ -1,4 +1,13 @@
-import { WorkbenchAgentOwner } from "../../electron/platform/workbench-agent";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import {
+  WorkbenchAgentOwner,
+  createWorkbenchAgentExtension,
+  createWorkbenchAgentTool,
+} from "../../electron/platform/workbench-agent";
+import { captureSize } from "../../electron/platform/workbench-capture";
 import { expect, test } from "@playwright/test";
 import {
   decodeWorkbenchAgentCommand,
@@ -60,7 +69,7 @@ test("workbench actions only accept acknowledgements from the originating chat a
   const state = { visible: false, selectedTabId: null, tabs: [] };
   respond({ id, state }, {} as Window);
   respond({ id, state }, window);
-  await expect(pending).resolves.toEqual(state);
+  await expect(pending).resolves.toEqual({ state });
   const switched = owner.execute(target, { action: "list" });
   const switchedId = (
     sent.filter((entry) => entry.channel.endsWith("request")).at(-1)!.value as { id: string }
@@ -94,4 +103,176 @@ test("workbench acknowledgements require bounded tab metadata and a valid select
     { visible: true, selectedTabId: null, tabs: [{ id: "one", title: "x".repeat(201) }] },
   ])
     expect(() => decodeWorkbenchAgentResponse({ id: "request", state })).toThrow();
+});
+
+test("capture takes only an optional tab_id and resolves bounded capture targets", () => {
+  expect(decodeWorkbenchAgentCommand({ action: "capture" })).toEqual({ action: "capture" });
+  expect(decodeWorkbenchAgentCommand({ action: "capture", tab_id: "files" })).toEqual({
+    action: "capture",
+    tab_id: "files",
+  });
+  for (const input of [
+    { action: "capture", tool: "browser" },
+    { action: "capture", url: "https://example.com" },
+    { action: "capture", path: "README.md" },
+    { action: "capture", tab_id: "" },
+  ])
+    expect(() => decodeWorkbenchAgentCommand(input)).toThrow();
+  const state = { visible: true, selectedTabId: "files", tabs: [{ id: "files", title: "Files" }] };
+  expect(
+    decodeWorkbenchAgentResponse({
+      id: "request",
+      state,
+      capture: { kind: "browser", tabId: "browser:one", pageId: "one", selected: true },
+    }).capture,
+  ).toEqual({ kind: "browser", tabId: "browser:one", pageId: "one", selected: true });
+  expect(
+    decodeWorkbenchAgentResponse({
+      id: "request",
+      state,
+      capture: {
+        kind: "pane",
+        tabId: "files",
+        tool: "files",
+        title: "Files",
+        description: "Open file: notes.md",
+        rect: { x: 600, y: 40, width: 420, height: 800 },
+      },
+    }).capture,
+  ).toMatchObject({ kind: "pane", rect: { width: 420 } });
+  for (const capture of [
+    { kind: "browser", tabId: "browser:one", pageId: "one" },
+    { kind: "window", tabId: "files" },
+    {
+      kind: "pane",
+      tabId: "files",
+      tool: "files",
+      title: "Files",
+      description: "",
+      rect: { x: 0, y: 0, width: 0, height: 10 },
+    },
+    {
+      kind: "pane",
+      tabId: "files",
+      tool: "files",
+      title: "Files",
+      description: "",
+      rect: { x: 0, y: 0, width: Infinity, height: 10 },
+    },
+    { kind: "pane", tabId: "files", tool: "chat", title: "Files", description: "" },
+  ])
+    expect(() => decodeWorkbenchAgentResponse({ id: "request", state, capture })).toThrow();
+});
+
+test("captures are downscaled to a bounded longest edge without changing their aspect", () => {
+  expect(captureSize(866, 1778)).toEqual({ width: 779, height: 1600 });
+  expect(captureSize(3200, 1000)).toEqual({ width: 1600, height: 500 });
+  expect(captureSize(800, 600)).toEqual({ width: 800, height: 600 });
+});
+
+test("capture results return the image to the model but keep it out of tool details", async () => {
+  const tool = createWorkbenchAgentTool(() =>
+    Promise.resolve({
+      state: { visible: true, selectedTabId: null, tabs: [] },
+      capture: {
+        summary: { tab_id: "browser:one", url: "http://localhost:8765/", title: "Preview" },
+        image: { data: "aW1hZ2U=", mimeType: "image/png", width: 10, height: 20 },
+      },
+    }),
+  );
+  const result = await tool.execute(
+    "call",
+    { action: "capture" },
+    undefined,
+    undefined,
+    {} as never,
+  );
+  expect(result.content).toEqual([
+    {
+      type: "text",
+      text: JSON.stringify({
+        tab_id: "browser:one",
+        url: "http://localhost:8765/",
+        title: "Preview",
+      }),
+    },
+    { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+  ]);
+  expect(JSON.stringify(result.details)).not.toContain("aW1hZ2U=");
+});
+
+test("workbench stays declared with its rules next to deferred tools and across extension reloads", async () => {
+  // pi is ESM-only; the Playwright unit lane compiles specs to CommonJS.
+  const {
+    createAgentSession,
+    createToolSearchExtension,
+    DefaultResourceLoader,
+    SessionManager,
+    SettingsManager,
+  } = await import("@earendil-works/pi-coding-agent");
+  const root = await mkdtemp(join(tmpdir(), "pi-gui-workbench-tools-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "workspace");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+  const settingsManager = SettingsManager.inMemory();
+  let connectServer = () => {};
+  // Stands in for an MCP server with deferred tools (like Slack) that connects after start.
+  const deferredServer: ExtensionFactory = (pi) => {
+    const register = (name: string) =>
+      pi.registerTool({
+        name,
+        label: name,
+        description: "Search Slack messages",
+        exposure: "deferred",
+        parameters: { type: "object", properties: {} },
+        execute: () => Promise.resolve({ content: [], details: undefined }),
+      });
+    register("mcp__slack__search");
+    connectServer = () => register("mcp__slack__read_thread");
+  };
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    settingsManager,
+    extensionFactories: [
+      { name: "tool-search", factory: createToolSearchExtension() },
+      // The same name and gating shape pi-gui's driver gives its built-in extensions.
+      {
+        name: "pi-gui-workbench",
+        factory: createWorkbenchAgentExtension(() => Promise.reject(new Error("unused"))),
+      },
+      { name: "slack-mcp", factory: deferredServer },
+    ],
+  });
+  await loader.reload();
+  settingsManager.applyOverrides({ defaultTools: ["+tool_search"] });
+  const { session } = await createAgentSession({
+    cwd,
+    agentDir,
+    resourceLoader: loader,
+    settingsManager,
+    sessionManager: SessionManager.inMemory(),
+  });
+  try {
+    await session.bindExtensions({});
+    const expectWorkbenchDeclared = () => {
+      const active = session.getActiveToolNames();
+      expect(active).toContain("workbench");
+      expect(active).toContain("tool_search");
+      expect(active.filter((name) => name.startsWith("mcp__"))).toEqual([]);
+      const workbench = session.getAllTools().find((entry) => entry.name === "workbench");
+      expect(workbench?.exposure).toBe("direct");
+      expect(workbench?.promptGuidelines?.join("\n")).toContain("action=capture");
+      expect(session.systemPrompt).toContain("workbench: see (capture) and control");
+      expect(session.systemPrompt).toContain("call workbench action=capture");
+    };
+    expectWorkbenchDeclared();
+    connectServer();
+    expectWorkbenchDeclared();
+    await session.reload();
+    expectWorkbenchDeclared();
+  } finally {
+    session.dispose();
+  }
 });

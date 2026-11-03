@@ -4,7 +4,8 @@ import {
   createWorkbenchAgentTool,
 } from "./platform/workbench-agent";
 import { mainFrameHandler } from "./ipc/main-frame-ipc";
-import { routeBrowserChromeShortcut } from "./platform/browser-owner";
+import { browserOwnerFor, routeBrowserChromeShortcut } from "./platform/browser-owner";
+import { createWorkbenchCapturer } from "./platform/workbench-capture";
 import {
   app,
   BrowserWindow,
@@ -1040,7 +1041,10 @@ app
     protocol.handle(DESKTOP_EXTENSION_SCHEME, (request) =>
       extensionViews.assetResponse(request.url),
     );
-    const workbenchAgent = new WorkbenchAgentOwner(() => windowOwner);
+    const workbenchAgent = new WorkbenchAgentOwner(
+      () => windowOwner,
+      createWorkbenchCapturer(() => browserOwnerFor(windowOwner)),
+    );
     const runWorkbenchCommand: Parameters<typeof createWorkbenchAgentTool>[0] = (
       ctx,
       command,

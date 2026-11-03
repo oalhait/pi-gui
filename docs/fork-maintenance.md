@@ -31,6 +31,20 @@ file opens, and browser navigation retains the exact page ID across delayed repl
 obtain `tab_id` for an existing browser page; without it, navigation targets the selected browser tab.
 This tool manages the application’s pane; it does not provide web page DOM automation.
 
+`capture` (optional `tab_id`, default the selected tab) is read-only. For a browser tab it
+captures the page’s own contents (`capturePage` on its view, not the window), so it works with
+pi-gui in the background or covered, and returns url, title, loading/error state and viewport.
+Blank and failed pages return no image and say why; a page the user is not looking at (other tab
+selected, pane hidden, overlay open) is still captured and marked `visible_to_user: false`. Files,
+Review, Terminal and extension tabs capture only the pane’s rectangle, plus a short description,
+and only while selected and visible. Images are downscaled to a 1600px longest edge and kept in
+memory; tool details never contain image bytes. Pi does persist the returned image in the
+session transcript like any other tool-result image.
+
+The tool is registered with `exposure: "direct"`, so it is declared from session start and stays
+declared when a deferred MCP server (such as Slack) activates `tool_search` or extensions reload;
+the unit regression in `tests/unit/workbench-agent.spec.ts` covers this.
+
 ## Compatibility and backups
 
 Keep the `com.pi-gui.desktop` app ID, `pi` userData directory, `~/.pi/agent` directory,

@@ -13,19 +13,31 @@ import {
   decodeWorkbenchAgentResponse,
   type WorkbenchAgentCommand,
   type WorkbenchAgentState,
+  type WorkbenchCaptureTarget,
 } from "../../contracts/workbench-agent";
+import type { WorkbenchCaptureResult, WorkbenchCapturer } from "./workbench-capture";
 import type { WindowOwner } from "../windows/window-owner";
 import type { MainFrameHandler } from "../ipc/main-frame-ipc";
 
+export interface WorkbenchAgentResult {
+  readonly state: WorkbenchAgentState;
+  readonly capture?: WorkbenchCaptureResult;
+}
 interface Pending {
   readonly window: BrowserWindow;
   readonly target: SessionRef;
-  readonly resolve: (state: WorkbenchAgentState) => void;
+  readonly resolve: (reply: {
+    state: WorkbenchAgentState;
+    capture?: WorkbenchCaptureTarget;
+  }) => void;
   readonly reject: (error: Error) => void;
 }
 export class WorkbenchAgentOwner {
   private readonly pending = new Map<string, Pending>();
-  constructor(private readonly windows: () => WindowOwner) {}
+  constructor(
+    private readonly windows: () => WindowOwner,
+    private readonly capturer?: WorkbenchCapturer,
+  ) {}
   private matches(window: BrowserWindow, target: SessionRef): boolean {
     if (window.isDestroyed() || window.webContents.isDestroyed()) return false;
     const view = this.windows().viewForWindow(window);
@@ -39,7 +51,7 @@ export class WorkbenchAgentOwner {
     target: SessionRef,
     command: WorkbenchAgentCommand,
     signal?: AbortSignal,
-  ): Promise<WorkbenchAgentState> {
+  ): Promise<WorkbenchAgentResult> {
     const window = this.windows()
       .allWindows()
       .find((candidate) => this.matches(candidate, target));
@@ -51,8 +63,9 @@ export class WorkbenchAgentOwner {
     const id = randomUUID();
     let cancel = () => {};
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let reply: { state: WorkbenchAgentState; capture?: WorkbenchCaptureTarget };
     try {
-      return await new Promise<WorkbenchAgentState>((resolve, reject) => {
+      reply = await new Promise((resolve, reject) => {
         this.pending.set(id, { window, target, resolve, reject });
         cancel = () => reject(new Error("Workbench action cancelled."));
         signal?.addEventListener("abort", cancel, { once: true });
@@ -79,6 +92,12 @@ export class WorkbenchAgentOwner {
       if (!window.isDestroyed() && !window.webContents.isDestroyed())
         window.webContents.send(desktopIpc.workbenchAgentCancel, id);
     }
+    if (command.action !== "capture") return { state: reply.state };
+    if (!reply.capture || !this.capturer) throw new Error("Side pane capture is unavailable.");
+    if (signal?.aborted) throw new Error("Workbench action cancelled.");
+    if (!this.matches(window, target))
+      throw new Error("The selected chat changed before the side pane was captured.");
+    return { state: reply.state, capture: await this.capturer(window, target, reply.capture) };
   }
   register(handle: MainFrameHandler): void {
     handle(desktopIpc.workbenchAgentResponse, decodeWorkbenchAgentResponse, (input, request) => {
@@ -90,7 +109,10 @@ export class WorkbenchAgentOwner {
         );
       else if (input.error) pending.reject(new Error(String(input.error).slice(0, 2000)));
       else if (input.state && Array.isArray(input.state.tabs) && input.state.tabs.length <= 100)
-        pending.resolve(input.state);
+        pending.resolve({
+          state: input.state,
+          ...(input.capture ? { capture: input.capture } : {}),
+        });
       else pending.reject(new Error("Invalid workbench state response."));
     });
   }
@@ -101,18 +123,21 @@ export function createWorkbenchAgentTool(
     ctx: ExtensionContext,
     command: WorkbenchAgentCommand,
     signal?: AbortSignal,
-  ) => Promise<WorkbenchAgentState>,
+  ) => Promise<WorkbenchAgentResult>,
 ): ToolDefinition<any, unknown> {
   return {
     name: "workbench",
     label: "Manage side pane",
+    // Always declared to the model from session start; never left for tool_search to load.
+    exposure: "direct",
     description:
-      "Control this chat's pi-gui side pane directly: list tabs; show/hide the pane; open Browser, Files, Review, Terminal or extension tabs; select/close exact tab IDs; navigate/back/forward/reload/stop browser pages. No macOS desktop permissions are needed. This controls the application UI, not web page contents.",
+      "Control and see this chat's pi-gui side pane (sidebar, browser view) directly: list tabs; show/hide the pane; open Browser, Files, Review, Terminal or extension tabs; select/close exact tab IDs; navigate/back/forward/reload/stop browser pages; capture a screenshot of the browser page or side pane tab the user is looking at. No macOS desktop permissions are needed.",
     promptSnippet:
-      "workbench: open websites or localhost previews in pi-gui's browser and manage the side pane's tabs.",
+      "workbench: see (capture) and control pi-gui's side pane: the built-in browser view, Files, Review, Terminal and extension tabs.",
     promptGuidelines: [
+      'When the user refers to what is in the browser, browser view, preview, side pane or sidebar ("what\'s in my browser", "look at this page"), call workbench action=capture. It returns a screenshot of just that page with its url and title. Do not take full-window or desktop screenshots, or use OS/desktop automation, to see pi-gui\'s side pane.',
       "Use workbench action=open tool=browser url=... when asked to show a page or preview in pi-gui. Do not ask the user to paste a URL or use OS automation for the side pane.",
-      "Use list to obtain exact tab_id values before selecting, closing or navigating an existing tab. Browser opens create a new top-level page; navigate changes an existing browser page.",
+      "Use list to obtain exact tab_id values before selecting, closing, navigating or capturing a tab other than the selected one. capture is read-only: it never changes tabs or visibility. Browser opens create a new top-level page; navigate changes an existing browser page.",
       "Only the requesting chat's pane is controlled. If this chat is not visible, ask the user to open it rather than changing a different chat.",
     ],
     parameters: {
@@ -122,6 +147,7 @@ export function createWorkbenchAgentTool(
           type: "string",
           enum: [
             "list",
+            "capture",
             "open",
             "select",
             "close",
@@ -135,7 +161,11 @@ export function createWorkbenchAgentTool(
           ],
         },
         tool: { type: "string", enum: ["browser", "files", "review", "terminal", "extension"] },
-        tab_id: { type: "string", description: "Exact top-level tab ID returned by list." },
+        tab_id: {
+          type: "string",
+          description:
+            "Exact top-level tab ID returned by list. capture defaults to the selected tab.",
+        },
         url: { type: "string", description: "HTTP/HTTPS URL or localhost address." },
         path: { type: "string", description: "Workspace-relative file to show in Files." },
         extension_id: { type: "string" },
@@ -146,8 +176,24 @@ export function createWorkbenchAgentTool(
     },
     async execute(_id, params, signal, _update, ctx): Promise<AgentToolResult<unknown>> {
       try {
-        const state = await run(ctx, decodeWorkbenchAgentCommand(params), signal);
-        return { content: [{ type: "text", text: JSON.stringify(state) }], details: state };
+        const result = await run(ctx, decodeWorkbenchAgentCommand(params), signal);
+        if (result.capture) {
+          const { summary, image } = result.capture;
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(summary) },
+              ...(image
+                ? [{ type: "image" as const, data: image.data, mimeType: image.mimeType }]
+                : []),
+            ],
+            // Details are kept in the transcript; they never include image bytes.
+            details: summary,
+          };
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify(result.state) }],
+          details: result.state,
+        };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {

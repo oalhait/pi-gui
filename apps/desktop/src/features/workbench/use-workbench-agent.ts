@@ -1,16 +1,43 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import type { PiDesktopApi } from "../../../contracts/ipc";
-import { toolRefId } from "../../../contracts/workbench";
+import { toolRefId, type ToolRef } from "../../../contracts/workbench";
 import {
   decodeWorkbenchAgentCommand,
   type WorkbenchAgentRequest,
   type WorkbenchAgentState,
+  type WorkbenchCaptureTarget,
 } from "../../../contracts/workbench-agent";
 import { workbenchToolLabel } from "./workbench";
 import type { useBrowserWorkbench } from "./use-browser-workbench";
 
 type Workbench = ReturnType<typeof useBrowserWorkbench>;
+
+/** A short text companion to a pane capture; never file or terminal contents. */
+function describeTool(tool: Exclude<ToolRef, { kind: "browser" }>, view: Workbench["view"]) {
+  switch (tool.kind) {
+    case "files": {
+      const files = view.files.tabs;
+      if (!files.active) return "No file is open.";
+      const others = files.tabs.length > 1 ? ` (${files.tabs.length} file tabs open)` : "";
+      return `Open file: ${files.active}${others}`;
+    }
+    case "changes": {
+      const selected = view.changes.selectedPath;
+      return `Review scope: ${view.changes.scope.kind}${selected ? `; selected file: ${selected}` : ""}`;
+    }
+    case "terminal": {
+      const title = document
+        .querySelector(
+          '[data-testid="terminal-tab"][aria-selected="true"] .terminal-panel__tab-title',
+        )
+        ?.textContent?.trim();
+      return `Terminal: ${title || "no session"}`;
+    }
+    case "extension":
+      return `Extension view ${tool.extensionId}/${tool.viewId}`;
+  }
+}
 export function useWorkbenchAgent(
   api: PiDesktopApi | undefined,
   target: SessionRef | null,
@@ -90,7 +117,42 @@ export function useWorkbenchAgent(
         }),
       };
     };
-    const execute = async (request: WorkbenchAgentRequest) => {
+    const captureTarget = (id: string): WorkbenchCaptureTarget => {
+      const value = current.current.workbench;
+      const tool = value.view.tools.find((entry) => toolRefId(entry) === id);
+      if (!tool) throw new Error("Unknown tab_id. Use list to inspect this chat's current tabs.");
+      const selected =
+        value.view.visibility === "visible" &&
+        value.view.selection.kind === "tool" &&
+        value.view.selection.toolId === id;
+      if (tool.kind === "browser") {
+        if (!tool.pageId) throw new Error("This browser tab has no page yet.");
+        return { kind: "browser", tabId: id, pageId: tool.pageId, selected };
+      }
+      const description = describeTool(tool, value.view);
+      const pane = selected ? document.querySelector('[data-testid="workbench"]') : null;
+      const box = pane?.getBoundingClientRect();
+      const base = {
+        kind: "pane" as const,
+        tabId: id,
+        tool: tool.kind === "changes" ? ("review" as const) : tool.kind,
+        title: workbenchToolLabel(tool).slice(0, 200),
+        description: description.slice(0, 2000),
+      };
+      if (value.view.visibility !== "visible")
+        return { ...base, unavailable: "The side pane is hidden. Use show to open it first." };
+      if (!selected)
+        return {
+          ...base,
+          unavailable: "This tab is not the selected side pane tab. Select it to capture it.",
+        };
+      if (!box || box.width <= 0 || box.height <= 0)
+        return { ...base, unavailable: "The side pane has no visible area." };
+      return { ...base, rect: { x: box.x, y: box.y, width: box.width, height: box.height } };
+    };
+    const execute = async (
+      request: WorkbenchAgentRequest,
+    ): Promise<{ state: WorkbenchAgentState; capture?: WorkbenchCaptureTarget }> => {
       checkTarget(request);
       const command = decodeWorkbenchAgentCommand(request.command);
       await waitFor(
@@ -104,6 +166,13 @@ export function useWorkbenchAgent(
       switch (command.action) {
         case "list":
           break;
+        case "capture": {
+          const id =
+            command.tab_id ??
+            (value.view.selection.kind === "tool" ? value.view.selection.toolId : undefined);
+          if (!id) throw new Error("No side pane tab is selected. Use list to choose a tab_id.");
+          return { state: state(), capture: captureTarget(id) };
+        }
         case "show":
         case "hide": {
           value.setVisibility(command.action === "show" ? "visible" : "hidden");
@@ -219,7 +288,7 @@ export function useWorkbenchAgent(
         }
       }
       checkTarget(request);
-      return state();
+      return { state: state() };
     };
     const unsubscribe = api.onWorkbenchAgentRequest((request) => {
       active.add(request.id);
@@ -227,7 +296,7 @@ export function useWorkbenchAgent(
         .then(async () => {
           try {
             const result = await execute(request);
-            await api.respondWorkbenchAgentRequest({ id: request.id, state: result });
+            await api.respondWorkbenchAgentRequest({ id: request.id, ...result });
           } catch (error) {
             await api.respondWorkbenchAgentRequest({
               id: request.id,

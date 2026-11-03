@@ -242,3 +242,176 @@ test("opening a browser URL keeps its created page ID when a user selects anothe
     await harness.close();
   }
 });
+
+type CaptureResult = {
+  content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
+  details: Record<string, unknown> & { error?: string };
+};
+async function capture(harness: DesktopHarness, target: SessionRef, tabId?: string) {
+  return harness.electronApp.evaluate(
+    async (_electron, input) => {
+      const hooks = (
+        globalThis as typeof globalThis & {
+          __PI_APP_TEST_HOOKS: { runWorkbenchRuntimeTool: (input: unknown) => Promise<unknown> };
+        }
+      ).__PI_APP_TEST_HOOKS;
+      return hooks.runWorkbenchRuntimeTool(input);
+    },
+    { sessionRef: target, params: { action: "capture", ...(tabId ? { tab_id: tabId } : {}) } },
+  ) as Promise<CaptureResult>;
+}
+/** Decodes the returned image in main and reports its size and the share of page-colored pixels. */
+async function inspectImage(harness: DesktopHarness, result: CaptureResult) {
+  const image = result.content.find((entry) => entry.type === "image");
+  if (!image || image.type !== "image") return undefined;
+  return harness.electronApp.evaluate(({ nativeImage }, input) => {
+    const decoded = nativeImage.createFromDataURL(`data:${input.mimeType};base64,${input.data}`);
+    const { width, height } = decoded.getSize();
+    const bitmap = decoded.toBitmap();
+    let magenta = 0;
+    for (let index = 0; index < bitmap.length; index += 4) {
+      // BGRA: the test page paints rgb(255, 0, 255).
+      if (bitmap[index] > 200 && bitmap[index + 1] < 60 && bitmap[index + 2] > 200) magenta += 1;
+    }
+    return { width, height, mimeType: input.mimeType, magenta: magenta / (width * height) };
+  }, image);
+}
+
+test("capture returns the browser page itself, read-only, and explains hidden or blank pages", async () => {
+  const server = createServer((_req, res) =>
+    res.end(
+      "<title>Capture proof</title><body style='margin:0;background:rgb(255,0,255)'><h1>Pixels from the page</h1></body>",
+    ),
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address();
+  if (!port || typeof port === "string") throw new Error("Missing test port");
+  const url = `http://127.0.0.1:${port.port}/`;
+  const workspace = await makeWorkspace("agent-capture");
+  await writeFile(join(workspace, "notes.md"), "# Captured notes");
+  const harness = await launchDesktop(await makeUserDataDir(), {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Capture Alpha");
+    const snapshot = await getDesktopState(window);
+    const target = {
+      workspaceId: snapshot.selectedWorkspaceId,
+      sessionId: snapshot.selectedSessionId,
+    };
+    const initial = await capture(harness, target);
+    expect(initial.details).toMatchObject({ kind: "review", tab_id: "changes", image: null });
+    expect(String(initial.details.note)).toContain("hidden");
+
+    const blank = await run(harness, target, { action: "open", tool: "browser" });
+    const blankId = blank.selectedTabId!;
+    const blankCapture = await capture(harness, target);
+    expect(blankCapture.content.some((entry) => entry.type === "image")).toBe(false);
+    expect(blankCapture.details).toMatchObject({
+      tab_id: blankId,
+      url: "about:blank",
+      image: null,
+    });
+    expect(String(blankCapture.details.note)).toContain("blank");
+
+    await run(harness, target, { action: "navigate", tab_id: blankId, url });
+    await expect
+      .poll(
+        async () =>
+          (await run(harness, target, { action: "list" })).tabs.find((tab) => tab.id === blankId)
+            ?.title,
+      )
+      .toBe("Capture proof");
+    const page = await capture(harness, target);
+    expect(page.details).toMatchObject({
+      tab_id: blankId,
+      kind: "browser",
+      url,
+      title: "Capture proof",
+      loading: false,
+      visible_to_user: true,
+    });
+    expect(page.details.note).toBeUndefined();
+    const pixels = await inspectImage(harness, page);
+    // The page's own pixels, not the pi-gui window chrome around it.
+    expect(pixels?.magenta).toBeGreaterThan(0.85);
+    expect(Math.max(pixels!.width, pixels!.height)).toBeLessThanOrEqual(1600);
+    const viewport = page.details.viewport as { width: number; height: number };
+    expect(viewport.width).toBeGreaterThan(0);
+    expect(pixels!.width / pixels!.height).toBeCloseTo(viewport.width / viewport.height, 1);
+    expect(JSON.stringify(page.details)).not.toContain(
+      (page.content.find((entry) => entry.type === "image") as { data: string }).data.slice(0, 64),
+    );
+
+    // Hidden pane: still the page's pixels (it is captured from its own contents), clearly marked.
+    await run(harness, target, { action: "hide" });
+    const hidden = await capture(harness, target, blankId);
+    expect(hidden.details).toMatchObject({ url, visible_to_user: false });
+    expect(String(hidden.details.note)).toContain("not looking at this page");
+    const hiddenPixels = await inspectImage(harness, hidden);
+    expect(hiddenPixels?.magenta).toBeGreaterThan(0.85);
+    // Capture is read-only: the pane stays hidden.
+    await expect(window.getByTestId("workbench")).toHaveCount(0);
+    expect((await run(harness, target, { action: "list" })).visible).toBe(false);
+    await run(harness, target, { action: "show" });
+
+    // Covered by an app overlay: the native page view is hidden, and the result says so.
+    await window.evaluate(() => {
+      const overlay = document.createElement("div");
+      overlay.setAttribute("role", "dialog");
+      overlay.id = "capture-test-overlay";
+      document.body.append(overlay);
+    });
+    await expect
+      .poll(async () => (await capture(harness, target)).details.visible_to_user)
+      .toBe(false);
+    expect(String((await capture(harness, target)).details.note)).toContain("overlay");
+    await window.evaluate(() => document.getElementById("capture-test-overlay")?.remove());
+
+    // Other tools: the pane rectangle from the window, plus a text description.
+    await run(harness, target, { action: "open", tool: "files", path: "notes.md" });
+    await expect(window.getByTestId("file-workbench-preview")).toContainText("Captured notes");
+    const files = await capture(harness, target);
+    expect(files.details).toMatchObject({ kind: "files", tab_id: "files" });
+    expect(String(files.details.description)).toContain("notes.md");
+    const filePixels = await inspectImage(harness, files);
+    expect(filePixels?.width).toBeGreaterThan(100);
+    expect(filePixels?.magenta).toBeLessThan(0.05);
+    // A non-selected pane tab is described but not selected or captured.
+    const browserById = await capture(harness, target, blankId);
+    expect(browserById.details).toMatchObject({ url, visible_to_user: false });
+    expect((await run(harness, target, { action: "list" })).selectedTabId).toBe("files");
+    const listedTerminal = await run(harness, target, { action: "open", tool: "terminal" });
+    expect(listedTerminal.selectedTabId).toBe("terminal");
+    const filesById = await capture(harness, target, "files");
+    expect(filesById.content.some((entry) => entry.type === "image")).toBe(false);
+    expect(String(filesById.details.note)).toContain("not the selected");
+    expect((await capture(harness, target, "missing")).details.error).toContain("Unknown tab_id");
+
+    // A failed page reports its error instead of a blank or stale image.
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const closedPort = (closed.address() as { port: number }).port;
+    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    await run(harness, target, {
+      action: "open",
+      tool: "browser",
+      url: `http://127.0.0.1:${closedPort}/`,
+    });
+    await expect
+      .poll(async () => (await capture(harness, target)).details.error)
+      .toContain("Couldn't load page");
+    const failed = await capture(harness, target);
+    expect(failed.content.some((entry) => entry.type === "image")).toBe(false);
+    expect(String(failed.details.note)).toContain("failed to load");
+
+    // Only this chat's pane.
+    await createNamedThread(window, "Capture Bravo");
+    expect((await capture(harness, target)).details.error).toContain("Open this chat");
+  } finally {
+    await harness.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
