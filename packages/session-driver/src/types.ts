@@ -205,6 +205,31 @@ export interface AssistantDeltaEvent extends SessionEventBase {
   readonly text: string;
 }
 
+/**
+ * One reasoning (thinking) block of the streaming assistant message, as pi streams it.
+ * `contentIndex` is the block's index in the message content. Redacted or encrypted
+ * reasoning can start complete, with no readable text and no deltas.
+ */
+export interface AssistantThinkingStartedEvent extends SessionEventBase {
+  readonly type: "assistantThinkingStarted";
+  readonly contentIndex: number;
+  readonly redacted?: boolean;
+}
+
+export interface AssistantThinkingDeltaEvent extends SessionEventBase {
+  readonly type: "assistantThinkingDelta";
+  readonly contentIndex: number;
+  readonly text: string;
+}
+
+/** The block ended; `text` is pi's authoritative content and replaces the streamed deltas. */
+export interface AssistantThinkingEndedEvent extends SessionEventBase {
+  readonly type: "assistantThinkingEnded";
+  readonly contentIndex: number;
+  readonly text: string;
+  readonly redacted?: boolean;
+}
+
 /** Finalizes one assistant message while the containing run may continue. */
 export interface AssistantMessageEndedEvent extends SessionEventBase {
   readonly type: "assistantMessageEnded";
@@ -388,6 +413,9 @@ export type SessionDriverEvent =
   | SessionOpenedEvent
   | SessionUpdatedEvent
   | AssistantDeltaEvent
+  | AssistantThinkingStartedEvent
+  | AssistantThinkingDeltaEvent
+  | AssistantThinkingEndedEvent
   | AssistantMessageEndedEvent
   | AssistantMessagePersistedEvent
   | UserMessagePersistedEvent

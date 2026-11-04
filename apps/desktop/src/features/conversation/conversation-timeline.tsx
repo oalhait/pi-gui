@@ -23,6 +23,7 @@ import { ThreadSearchBar } from "./thread-search";
 import type { RunExtensionAction } from "./extension-card";
 import { TimelineItem } from "./timeline-item";
 import { sameRowContent, type TimelineRow } from "./timeline-layout";
+import { useThinkingDisplay, type ThinkingDisplay } from "./thinking-display";
 import type { OpenTurnChange } from "./turn-changes-card";
 import type { WorkspaceFileLine } from "./workspace-file-line";
 import { SparkIcon } from "../../ui/icons";
@@ -118,6 +119,25 @@ export function ConversationTimeline({
       return new Set([...current].filter((id) => available.has(id)));
     });
   }, [transcript]);
+  // A row the user opened or closed keeps that; others follow the Show thinking setting, and
+  // a block still streaming shows its newest lines.
+  const [thinkingDisplay] = useThinkingDisplay();
+  const [thinkingOverrides, setThinkingOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
+  const toggleThinking = useCallback(
+    (id: string, expanded: boolean) =>
+      setThinkingOverrides((current) => new Map(current).set(id, expanded)),
+    [],
+  );
+  useLayoutEffect(() => {
+    setThinkingOverrides((current) => {
+      if (current.size === 0) return current;
+      const available = new Set(transcript.map((item) => item.id));
+      if ([...current.keys()].every((id) => available.has(id))) return current;
+      return new Map([...current].filter(([id]) => available.has(id)));
+    });
+  }, [transcript]);
   const renderedMessageIndexById = useMemo(() => {
     const indices = new Map<string, number>();
     let index = 0;
@@ -178,6 +198,8 @@ export function ConversationTimeline({
                     generation={viewport.layoutGeneration}
                     expandedToolCallIds={expandedToolCallIds}
                     onToggleToolCall={toggleToolCall}
+                    thinkingExpanded={thinkingExpanded(item, thinkingOverrides, thinkingDisplay)}
+                    onToggleThinking={toggleThinking}
                     onViewFileInDiff={onViewFileInDiff}
                     onOpenTurnChange={onOpenTurnChange}
                     sourceMessageIndex={renderedMessageIndexById.get(item.id)}
@@ -280,6 +302,15 @@ function TranscriptEmptyState() {
   );
 }
 
+function thinkingExpanded(
+  item: DisplayTimelineItem,
+  overrides: ReadonlyMap<string, boolean>,
+  display: ThinkingDisplay,
+): boolean {
+  if (item.kind !== "thinking") return false;
+  return overrides.get(item.id) ?? (item.streaming === true || display === "expanded");
+}
+
 interface MeasuredTimelineItemProps {
   readonly item: DisplayTimelineItem;
   readonly className?: string;
@@ -290,6 +321,8 @@ interface MeasuredTimelineItemProps {
   readonly generation: number;
   readonly expandedToolCallIds: ReadonlySet<string>;
   readonly onToggleToolCall: (callId: string) => void;
+  readonly thinkingExpanded: boolean;
+  readonly onToggleThinking: (id: string, expanded: boolean) => void;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
   readonly sourceMessageIndex?: number;
@@ -312,6 +345,8 @@ function MeasuredTimelineItemBase({
   generation,
   expandedToolCallIds,
   onToggleToolCall,
+  thinkingExpanded,
+  onToggleThinking,
   onViewFileInDiff,
   onOpenTurnChange,
   sourceMessageIndex,
@@ -361,6 +396,8 @@ function MeasuredTimelineItemBase({
           item={item}
           expandedToolCallIds={expandedToolCallIds}
           onToggleToolCall={onToggleToolCall}
+          thinkingExpanded={thinkingExpanded}
+          onToggleThinking={onToggleThinking}
           onViewFileInDiff={onViewFileInDiff}
           onOpenTurnChange={onOpenTurnChange}
           sourceMessageIndex={sourceMessageIndex}
@@ -411,6 +448,9 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
       a.metadata === b.metadata
     );
   }
+  if (a.kind === "thinking" && b.kind === "thinking") {
+    return sameRowContent(a, b);
+  }
   if (a.kind === "activity" && b.kind === "activity") {
     return (
       a.label === b.label && a.detail === b.detail && a.metadata === b.metadata && a.tone === b.tone
@@ -453,6 +493,8 @@ function areMeasuredTimelineItemPropsEqual(
     prev.onHeightChange === next.onHeightChange &&
     prev.expandedToolCallIds === next.expandedToolCallIds &&
     prev.onToggleToolCall === next.onToggleToolCall &&
+    prev.thinkingExpanded === next.thinkingExpanded &&
+    prev.onToggleThinking === next.onToggleThinking &&
     prev.onViewFileInDiff === next.onViewFileInDiff &&
     prev.onOpenTurnChange === next.onOpenTurnChange &&
     prev.sourceMessageIndex === next.sourceMessageIndex &&

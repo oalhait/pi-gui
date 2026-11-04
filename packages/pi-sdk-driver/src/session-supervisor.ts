@@ -103,6 +103,7 @@ import {
   shouldPersistSnapshotForAgentEvent,
   shouldTailFromDisk,
   singleFlight,
+  thinkingDriverEvent,
   titleFromSessionInfo,
   toSessionErrorInfo,
   transcriptFromMessages,
@@ -120,6 +121,7 @@ import {
 import { forcePersistPiSession } from "./compat/pi-session-persistence.js";
 import { createTurnCaptureExtension } from "./turn-capture.js";
 import { createTranscriptIdentityExtension } from "./transcript-identity.js";
+import { createThinkingTimingExtension } from "./thinking-timing.js";
 import { createPlanLimitsExtension, readSessionUsage } from "./session-usage.js";
 import {
   createDesktopExtensionBridge,
@@ -440,6 +442,11 @@ export class SessionSupervisor {
                 );
               },
             }),
+          },
+          {
+            name: "pi-gui-thinking-timing",
+            hidden: true,
+            factory: createThinkingTimingExtension(),
           },
           ...(this.onTurnCaptureBoundary
             ? [
@@ -2879,6 +2886,15 @@ export class SessionSupervisor {
             },
             record,
           );
+        }
+        if (event.message.role === "assistant") {
+          const thinking = thinkingDriverEvent(
+            event.assistantMessageEvent,
+            event.message.content,
+            record.ref,
+            timestamp,
+          );
+          if (thinking) return toDriverEvents(thinking, record);
         }
         return [sessionUpdatedEvent(record)];
       case "tool_execution_start":

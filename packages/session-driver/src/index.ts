@@ -1,6 +1,9 @@
 export type {
   AssistantDeltaEvent,
   AssistantMessageEndedEvent,
+  AssistantThinkingDeltaEvent,
+  AssistantThinkingEndedEvent,
+  AssistantThinkingStartedEvent,
   AssistantMessagePersistedEvent,
   UserMessagePersistedEvent,
   TranscriptItemAppendedEvent,
@@ -85,6 +88,7 @@ export type {
   SessionTranscriptMessage,
   SessionTranscriptPin,
   SessionTranscriptRole,
+  SessionTranscriptThinking,
   SessionTranscriptToolCall,
 } from "./transcript.js";
 

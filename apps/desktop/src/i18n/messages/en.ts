@@ -189,6 +189,14 @@ export const en = {
   "settings.general.skillCommands.description":
     "Offer each skill as a slash command in the composer.",
   "settings.general.skillCommands.label": "Enable skill slash commands",
+  "settings.general.groupConversation": "Conversation",
+  "settings.general.thinking.title": "Show thinking",
+  "settings.general.thinking.description":
+    "How the model's reasoning appears in threads: in full, as one line you can open, or not at all.",
+  "settings.general.thinking.label": "Show thinking",
+  "settings.general.thinking.expanded": "Expanded",
+  "settings.general.thinking.collapsed": "Collapsed",
+  "settings.general.thinking.hidden": "Hidden",
   "settings.general.groupTerminal": "Terminal",
   "settings.general.shell.title": "Shell",
   "settings.general.shell.description":

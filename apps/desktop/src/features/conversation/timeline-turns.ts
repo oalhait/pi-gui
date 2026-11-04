@@ -14,8 +14,8 @@ function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
 /**
  * Insert "Worked for Ns" turn markers, derived purely from real message/tool
  * timestamps. A turn begins at a user message and runs until the next user
- * message; the marker sits directly above the turn's final assistant reply
- * (Codex-style), or at the end of the turn when it has no assistant reply, and
+ * message; the marker sits directly above the turn's final assistant reply and
+ * the reasoning rows that lead into it (Codex-style), or at the end of the turn when it has no assistant reply, and
  * reports the elapsed time from the prompt to the last item of that turn.
  *
  * Durations are never fabricated: a marker is emitted only when the turn has
@@ -31,14 +31,19 @@ function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
  * where the newest output appears.
  */
 export function buildDisplayTimelineItems(
-  transcript: readonly TimelineTranscriptItem[],
+  fullTranscript: readonly TimelineTranscriptItem[],
   options: {
     readonly lastTurnRunning?: boolean;
     /** When the running turn started; shown as elapsed time on the "Working" line. */
     readonly runningSince?: string;
     readonly turnChanges?: readonly TurnChangeSummary[];
+    /** The Show thinking setting is Hidden: reasoning rows are left out. */
+    readonly hideThinking?: boolean;
   } = {},
 ): readonly DisplayTimelineItem[] {
+  const transcript = options.hideThinking
+    ? fullTranscript.filter((item) => item.kind !== "thinking")
+    : fullTranscript;
   // Marker to emit immediately before the transcript item at that index.
   // Index `transcript.length` means "after the last item".
   const markersBefore = new Map<number, TimelineTurnMarker>();
@@ -71,6 +76,8 @@ export function buildDisplayTimelineItems(
       }
       if (item.kind === "message" && item.role === "assistant") {
         finalReplyIndex = index;
+        // The reply's own reasoning stays with it, below the marker.
+        while (transcript[finalReplyIndex - 1]?.kind === "thinking") finalReplyIndex -= 1;
       }
       // An extension can post into the thread long after the run settled, and a keyed card
       // carries its latest write's time; a message steered into the run is already covered

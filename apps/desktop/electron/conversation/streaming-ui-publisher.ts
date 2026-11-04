@@ -9,7 +9,7 @@ import type { SessionDriverEvent, SessionRef } from "@pi-gui/session-driver";
 export const STREAMING_UI_PUBLISH_INTERVAL_MS = 50;
 
 /**
- * Token-level `assistantDelta` always arrives with a redundant `sessionUpdated`
+ * Token-level `assistantDelta` (and `assistantThinkingDelta`) always arrives with a redundant `sessionUpdated`
  * (preview/timestamp). Publishing full app state for each pair was the leftover
  * #93 CPU path after #114. Defer those two; flush immediately on discrete events.
  *
@@ -21,7 +21,11 @@ export function shouldDeferStreamingUiPublish(
   event: SessionDriverEvent,
   trackedRunId: string | undefined,
 ): boolean {
-  if (event.type === "assistantDelta" || event.type === "toolUpdated") {
+  if (
+    event.type === "assistantDelta" ||
+    event.type === "assistantThinkingDelta" ||
+    event.type === "toolUpdated"
+  ) {
     return true;
   }
   if (event.type !== "sessionUpdated" || event.snapshot.status !== "running") {

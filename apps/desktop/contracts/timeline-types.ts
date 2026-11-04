@@ -4,6 +4,7 @@ import type {
   SessionTranscriptMessage,
   SessionTranscriptPin,
   SessionTranscriptRole,
+  SessionTranscriptThinking,
 } from "@pi-gui/session-driver";
 import type { TurnChangeSummary } from "./review";
 
@@ -45,8 +46,19 @@ export interface TimelineSummary {
   readonly presentation: TimelineSummaryPresentation;
 }
 
+/**
+ * A reasoning block. `streaming` is set only while a live block is still arriving; its
+ * `createdAt` is when the block started, so the row can tick its elapsed time.
+ */
+export interface TimelineThinking extends SessionTranscriptThinking {
+  readonly streaming?: boolean;
+  /** While streaming, the block's index in the assistant message content. */
+  readonly streamingContentIndex?: number;
+}
+
 export type TranscriptMessage =
   | SessionTranscriptMessage
+  | TimelineThinking
   | SessionTranscriptCustomMessage
   | SessionTranscriptCard
   | SessionTranscriptPin

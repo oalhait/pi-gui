@@ -41,6 +41,8 @@ import {
   TerminalIcon,
 } from "../../ui/icons";
 import { extensionToLanguage } from "../../ui/syntax-highlight";
+import { formatElapsedDuration } from "./elapsed-duration";
+import { TimelineThinkingItem } from "./timeline-thinking";
 
 export function TimelineItem({
   item,
@@ -57,10 +59,15 @@ export function TimelineItem({
   onExtensionAction,
   annotationMarkers,
   onOpenAnnotation,
+  thinkingExpanded = false,
+  onToggleThinking,
 }: {
   readonly item: DisplayTimelineItem;
   readonly expandedToolCallIds?: ReadonlySet<string>;
   readonly onToggleToolCall?: (callId: string) => void;
+  /** Whether a thinking row shows its text; the timeline owns this per row. */
+  readonly thinkingExpanded?: boolean;
+  readonly onToggleThinking?: (id: string, expanded: boolean) => void;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly sourceMessageIndex?: number;
   readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
@@ -107,6 +114,10 @@ export function TimelineItem({
       );
     case "summary":
       return <TimelineSummaryItem item={item} />;
+    case "thinking":
+      return (
+        <TimelineThinkingItem item={item} expanded={thinkingExpanded} onToggle={onToggleThinking} />
+      );
     case "custom":
       return <TimelineCustomMessage item={item} />;
     case "card":
@@ -546,7 +557,7 @@ function statusLabel(status: "running" | "success" | "error") {
 function TimelineTurnMarkerItem({ item }: { readonly item: TimelineTurnMarker }) {
   return (
     <div className="timeline-turn-marker" data-testid="timeline-turn-marker">
-      <span className="timeline-turn-marker__label">{`Worked for ${formatWorkedDuration(item.durationMs)}`}</span>
+      <span className="timeline-turn-marker__label">{`Worked for ${formatElapsedDuration(item.durationMs)}`}</span>
     </div>
   );
 }
@@ -558,21 +569,6 @@ function TimelineWorkingItem({ item }: { readonly item: TimelineWorkingIndicator
       <span className="timeline-working__label">{label}</span>
     </div>
   );
-}
-
-function formatWorkedDuration(durationMs: number): string {
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) {
-    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
 }
 
 function TimelineSummaryItem({ item }: { readonly item: TimelineSummary }) {

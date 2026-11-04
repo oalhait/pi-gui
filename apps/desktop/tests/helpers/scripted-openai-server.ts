@@ -11,9 +11,17 @@ export interface ScriptedChatRequest {
   readonly toolNames: readonly string[];
 }
 
-/** One model reply: plain text, or a single tool call that pi runs before asking again. */
+/**
+ * One model reply: plain text, or a single tool call that pi runs before asking again.
+ * `thinking` streams first as reasoning chunks (`reasoning_content`, which pi reads as a
+ * thinking block); `holdAfterThinking` keeps the reply waiting there until it settles.
+ */
 export type ScriptedReply =
-  | { readonly text: string }
+  | {
+      readonly text: string;
+      readonly thinking?: readonly string[];
+      readonly holdAfterThinking?: Promise<void>;
+    }
   | { readonly tool: string; readonly args: Readonly<Record<string, unknown>> };
 
 export interface ScriptedOpenAiServer {
@@ -33,10 +41,7 @@ export async function startScriptedOpenAiServer(
   let calls = 0;
   const server = createServer((request, response) => {
     let body = "";
-    request.on("data", (chunk: Buffer) => {
-      body += chunk.toString();
-    });
-    request.on("end", () => {
+    const respond = async () => {
       const payload = JSON.parse(body) as {
         messages?: { role: string; content: unknown }[];
         tools?: { function?: { name?: string } }[];
@@ -80,10 +85,22 @@ export async function startScriptedOpenAiServer(
         );
         chunk({}, "tool_calls");
       } else {
+        for (const part of next.thinking ?? []) {
+          chunk({ role: "assistant", reasoning_content: part }, null);
+        }
+        if (next.holdAfterThinking) await next.holdAfterThinking;
         chunk({ role: "assistant", content: next.text }, null);
         chunk({}, "stop");
       }
       response.end("data: [DONE]\n\n");
+    };
+    request.on("data", (chunk: Buffer) => {
+      body += chunk.toString();
+    });
+    request.on("end", () => {
+      respond().catch((error: unknown) => {
+        response.destroy(error instanceof Error ? error : new Error(String(error)));
+      });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

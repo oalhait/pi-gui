@@ -19,6 +19,7 @@ import { useDesktopCommands } from "./use-desktop-commands";
 import { useRunningLabel } from "../features/conversation/hooks/use-running-label";
 import { useTimelineViewport } from "../features/conversation/hooks/use-timeline-viewport";
 import { buildDisplayTimelineItems } from "../features/conversation/timeline-turns";
+import { useThinkingDisplay } from "../features/conversation/thinking-display";
 import { useTurnChanges } from "../features/conversation/hooks/use-turn-changes";
 import { restoreTopmostDialogFocus } from "../ui/dialog-focus";
 import { ComposerPanel } from "../features/conversation/composer-panel";
@@ -279,6 +280,7 @@ export default function App() {
   const isTranscriptLoading =
     Boolean(selectedSession) && !selectedTranscriptForSession && !transcriptFailed;
   const selectedSessionRunning = selectedSession?.status === "running";
+  const [thinkingDisplay] = useThinkingDisplay();
   const turnChanges = useTurnChanges({
     api,
     target: workbenchTarget,
@@ -291,8 +293,15 @@ export default function App() {
         lastTurnRunning: selectedSessionRunning,
         runningSince: selectedSessionRunning ? selectedSession?.runningSince : undefined,
         turnChanges: turnChanges.turns,
+        hideThinking: thinkingDisplay === "hidden",
       }),
-    [pins.timeline, selectedSessionRunning, selectedSession?.runningSince, turnChanges.turns],
+    [
+      pins.timeline,
+      selectedSessionRunning,
+      selectedSession?.runningSince,
+      turnChanges.turns,
+      thinkingDisplay,
+    ],
   );
   const viewport = useTimelineViewport({
     sessionKey: selectedSessionKey,

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
 import type { ModelSettingsScopeMode } from "../../../contracts/desktop-state";
 import { useTranslation } from "../../i18n";
+import { useThinkingDisplay } from "../conversation/thinking-display";
 import { SettingsSegmented, SettingsSwitch } from "./settings-controls";
 import { SettingsGroup, SettingsRow } from "./settings-utils";
 
@@ -24,6 +25,7 @@ export function SettingsGeneralSection({
 }: SettingsGeneralSectionProps) {
   const { t } = useTranslation();
   const [terminalShellDraft, setTerminalShellDraft] = useState(integratedTerminalShell);
+  const [thinkingDisplay, setThinkingDisplay] = useThinkingDisplay();
 
   useEffect(() => {
     setTerminalShellDraft(integratedTerminalShell);
@@ -60,6 +62,24 @@ export function SettingsGeneralSection({
             checked={runtime?.settings.enableSkillCommands ?? true}
             label={t("settings.general.skillCommands.label")}
             onChange={onToggleSkillCommands}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("settings.general.groupConversation")}>
+        <SettingsRow
+          title={t("settings.general.thinking.title")}
+          description={t("settings.general.thinking.description")}
+        >
+          <SettingsSegmented
+            label={t("settings.general.thinking.label")}
+            options={[
+              { value: "expanded", label: t("settings.general.thinking.expanded") },
+              { value: "collapsed", label: t("settings.general.thinking.collapsed") },
+              { value: "hidden", label: t("settings.general.thinking.hidden") },
+            ]}
+            value={thinkingDisplay}
+            onChange={setThinkingDisplay}
           />
         </SettingsRow>
       </SettingsGroup>
