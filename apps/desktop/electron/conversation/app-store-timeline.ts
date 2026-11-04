@@ -39,6 +39,8 @@ interface TimelineRuntimeState {
   readonly runningSinceBySession: Map<string, string>;
   readonly activeAssistantMessageBySession: Map<string, string>;
   readonly pendingAssistantMessageBySession: Map<string, string>;
+  /** IDs of user rows sent this run, oldest first, still waiting for their session entry ID. */
+  readonly unpersistedUserMessagesBySession: Map<string, string[]>;
   /** Labels of the tools the session's folder extensions registered. */
   readonly extensionToolLabels: (sessionRef: SessionRef) => ExtensionToolLabels;
 }
@@ -87,6 +89,18 @@ export function appendUserMessage(
   transcript.push(message);
   transcriptCache.set(key, transcript);
   return message.id;
+}
+
+/** Remember a user row sent in this run until Pi reports the entry it persisted it as. */
+export function trackUnpersistedUserMessage(
+  unpersistedUserMessagesBySession: Map<string, string[]>,
+  sessionRef: SessionRef,
+  messageId: string,
+): void {
+  const key = sessionKey(sessionRef);
+  const pending = unpersistedUserMessagesBySession.get(key) ?? [];
+  if (!pending.includes(messageId))
+    unpersistedUserMessagesBySession.set(key, [...pending, messageId]);
 }
 
 export function appendQueuedUserMessage(
@@ -219,7 +233,35 @@ export function applyTimelineEvent(
       state.pendingAssistantMessageBySession.delete(key);
       clearActiveAssistantMessage(state.activeAssistantMessageBySession, event.sessionRef);
       appendQueuedUserMessage(transcriptCache, event.sessionRef, event.message);
+      trackUnpersistedUserMessage(
+        state.unpersistedUserMessagesBySession,
+        event.sessionRef,
+        event.message.id,
+      );
       return;
+    case "userMessagePersisted": {
+      // Pi persists user messages in the order they were sent. Prefer the oldest waiting row
+      // with the persisted text; Pi's skill and template expansion can change the text.
+      const pending = (state.unpersistedUserMessagesBySession.get(key) ?? []).filter((id) =>
+        transcript.some((item) => item.id === id),
+      );
+      const text = event.text.trim();
+      const matched = pending.find((id) =>
+        transcript.some(
+          (item) => item.id === id && item.kind === "message" && item.text.trim() === text,
+        ),
+      );
+      const rowId = matched ?? pending[0];
+      state.unpersistedUserMessagesBySession.set(
+        key,
+        pending.filter((id) => id !== rowId),
+      );
+      const index = transcript.findIndex((item) => item.id === rowId);
+      const row = transcript[index];
+      if (row?.kind !== "message" || row.role !== "user") return;
+      transcript[index] = { ...row, sourceMessageId: event.sourceMessageId };
+      break;
+    }
     case "toolStarted": {
       clearActiveAssistantMessage(state.activeAssistantMessageBySession, event.sessionRef);
       const metrics = currentMetrics ?? {

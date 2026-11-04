@@ -337,6 +337,7 @@ export class DesktopAppStore {
         sessionConfigBySession: this.sessionState.sessionConfigBySession,
         sessionErrorsBySession: this.sessionState.sessionErrorsBySession,
         transcriptCache: this.sessionState.transcriptCache,
+        unpersistedUserMessagesBySession: this.sessionState.unpersistedUserMessagesBySession,
       },
       runtimeForWorkspace: (workspaceId) => this.runtimeByWorkspace.get(workspaceId),
       initialize: () => this.initialize(),
@@ -1262,7 +1263,31 @@ export class DesktopAppStore {
     const sessionRef = toSessionRef(target);
     await this.ensureSessionReady(sessionRef);
 
-    const result = await this.driver.navigateSessionTree(sessionRef, targetId, options);
+    return this.publishTreeNavigation(
+      target,
+      await this.driver.navigateSessionTree(sessionRef, targetId, options),
+    );
+  }
+
+  /** Edit a sent user message: rewind the thread to just before it, keeping later turns in /tree. */
+  async rewindToMessage(
+    target: WorkspaceSessionTarget,
+    sourceMessageId: string,
+  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }> {
+    await this.initialize();
+    const sessionRef = toSessionRef(target);
+    await this.ensureSessionReady(sessionRef);
+    return this.publishTreeNavigation(
+      target,
+      await this.driver.rewindToUserMessage(sessionRef, sourceMessageId),
+    );
+  }
+
+  private async publishTreeNavigation(
+    target: WorkspaceSessionTarget,
+    result: NavigateSessionTreeResult,
+  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }> {
+    const sessionRef = toSessionRef(target);
     if (!result.cancelled && !result.aborted) {
       await this.reloadTranscriptFromDriver(sessionRef);
       await this.refreshSessionCommandsFor(sessionRef);
@@ -3603,6 +3628,7 @@ export class DesktopAppStore {
         runningSinceBySession: this.sessionState.runningSinceBySession,
         activeAssistantMessageBySession: this.sessionState.activeAssistantMessageBySession,
         pendingAssistantMessageBySession: this.sessionState.pendingAssistantMessageBySession,
+        unpersistedUserMessagesBySession: this.sessionState.unpersistedUserMessagesBySession,
         extensionToolLabels: (ref) =>
           extensionToolLabels(this.runtimeByWorkspace.get(ref.workspaceId)),
       });

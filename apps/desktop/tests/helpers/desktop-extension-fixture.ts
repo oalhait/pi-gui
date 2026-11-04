@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { chooseNewWorkbenchTab } from "./electron-app";
 import { join } from "node:path";
 import { expect, type Page } from "@playwright/test";
 
@@ -78,9 +79,7 @@ export async function mount(root, host) {
 export async function openDesktopExtensionFixture(window: Page): Promise<void> {
   const workbench = window.getByTestId("workbench");
   if (!(await workbench.isVisible())) await window.getByTestId("toggle-side-panel").click();
-  const chooser = window.getByTestId("workbench-chooser");
-  if (!(await chooser.isVisible())) await window.getByTestId("workbench-add-tab").click();
-  await chooser.getByRole("button", { name: "Security fixture", exact: true }).click();
+  await chooseNewWorkbenchTab(window, "Security fixture");
 }
 
 /**

@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type FrameLocator, type Page } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   launchDesktop,
   makeUserDataDir,
   makeWorkspace,
@@ -18,9 +19,7 @@ const MODEL_ID = "scripted";
 async function openTrace(window: Page): Promise<FrameLocator> {
   const workbench = window.getByTestId("workbench");
   if (!(await workbench.isVisible())) await window.getByTestId("toggle-side-panel").click();
-  const chooser = window.getByTestId("workbench-chooser");
-  if (!(await chooser.isVisible())) await window.getByTestId("workbench-add-tab").click();
-  await chooser.getByRole("button", { name: "Trace", exact: true }).click();
+  await chooseNewWorkbenchTab(window, "Trace");
   const frame = window.frameLocator('[data-testid="extension-view-frame"]');
   await expect(frame.getByRole("heading", { name: "Trace", exact: true })).toBeVisible();
   await expectExtensionViewReady(window);

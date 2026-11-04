@@ -1,4 +1,11 @@
-import { routeBrowserChromeShortcut } from "./platform/browser-owner";
+import {
+  WorkbenchAgentOwner,
+  createWorkbenchAgentExtension,
+  createWorkbenchAgentTool,
+} from "./platform/workbench-agent";
+import { mainFrameHandler } from "./ipc/main-frame-ipc";
+import { browserOwnerFor, routeBrowserChromeShortcut } from "./platform/browser-owner";
+import { createWorkbenchCapturer } from "./platform/workbench-capture";
 import {
   app,
   BrowserWindow,
@@ -51,6 +58,8 @@ import {
 } from "./scheduled-tasks/scheduled-task-runtime";
 import { getChangedFiles, getFileDiff, stageFile } from "./platform/files/app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./platform/files/app-store-files";
+import { WorkspaceImageServer } from "./platform/files/workspace-images";
+import { WORKSPACE_IMAGE_HOST } from "../contracts/workspace-images";
 import { resolveExistingWorkspacePath } from "./platform/files/workspace-paths";
 import { MAIN_DEV_RELOAD_MARKER } from "./dev-reload-main-probe";
 import { NotificationManager } from "./platform/notification-manager";
@@ -96,6 +105,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: TOOL_IMAGE_SCHEME, privileges: { standard: true, secure: true } },
 ]);
 
+/** Image files a window's Files tabs show, served on the tool-image scheme's workspace host. */
+const workspaceImages = new WorkspaceImageServer();
+const workspaceImageWindows = new WeakSet<BrowserWindow>();
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
 const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
 const windowTestMode = appTestMode ?? "foreground";
@@ -1034,6 +1046,15 @@ app
     protocol.handle(DESKTOP_EXTENSION_SCHEME, (request) =>
       extensionViews.assetResponse(request.url),
     );
+    const workbenchAgent = new WorkbenchAgentOwner(
+      () => windowOwner,
+      createWorkbenchCapturer(() => browserOwnerFor(windowOwner)),
+    );
+    const runWorkbenchCommand: Parameters<typeof createWorkbenchAgentTool>[0] = (
+      ctx,
+      command,
+      signal,
+    ) => workbenchAgent.execute(sessionRefFromExtensionContext(ctx), command, signal);
     const driverOptions: NonNullable<
       ConstructorParameters<typeof DesktopAppStore>[0]["driverOptions"]
     > = {
@@ -1048,6 +1069,12 @@ app
       },
       openUrl: openMcpSignInUrl,
       builtinExtensions: [
+        {
+          name: "pi-gui-workbench",
+          displayName: "Side pane controls",
+          description: "Lets pi open browser pages and manage this chat’s side pane",
+          factory: createWorkbenchAgentExtension(runWorkbenchCommand),
+        },
         {
           name: "pi-gui-thread-orchestration",
           displayName: "Thread orchestration",
@@ -1078,7 +1105,11 @@ app
       generateThreadTitleOverride: async (workspace, options) =>
         generateThreadTitleOverride?.(workspace, options),
     });
-    protocol.handle(TOOL_IMAGE_SCHEME, (request) => store.transcriptImageResponse(request.url));
+    protocol.handle(TOOL_IMAGE_SCHEME, (request) =>
+      new URL(request.url).host === WORKSPACE_IMAGE_HOST
+        ? workspaceImages.response(request.url)
+        : store.transcriptImageResponse(request.url),
+    );
     windowOwner = new WindowOwner(store, {
       onActiveWindowChanged: (window) => {
         mainWindow = window;
@@ -1086,6 +1117,7 @@ app
         notificationPermissionService?.trackWindow(window);
       },
     });
+    workbenchAgent.register(mainFrameHandler(windowOwner));
     await store.initialize();
     themeManager.setMode(store.snapshot().themeMode);
     integratedTerminalShell = (await store.getState()).integratedTerminalShell;
@@ -1116,6 +1148,14 @@ app
           },
           promptForText: (message: string, placeholder?: string, allowEmpty?: boolean) =>
             promptForText(mainWindow, message, placeholder ?? "", allowEmpty ?? false),
+          runWorkbenchRuntimeTool: (input: OrchestrationRuntimeToolTestInput) =>
+            createWorkbenchAgentTool(runWorkbenchCommand).execute(
+              input.toolCallId ?? "workbench-test",
+              input.params,
+              undefined,
+              undefined,
+              createTestExtensionContext(input.sessionRef),
+            ),
           runOrchestrationRuntimeTool: (input: OrchestrationRuntimeToolTestInput) =>
             runOrchestrationRuntimeToolForTest(orchestrationRuntimeBridge, input),
           runScheduledTaskRuntimeTool: (input: ScheduledTaskRuntimeToolTestInput) =>
@@ -1257,6 +1297,14 @@ app
           attachments.flatMap(validateComposerAttachmentPayload),
         listWorkspaceFiles,
         readWorkspaceFile,
+        openWorkspaceImage: (window, workspacePath, filePath) => {
+          if (!workspaceImageWindows.has(window)) {
+            workspaceImageWindows.add(window);
+            const windowId = window.id;
+            window.once("closed", () => workspaceImages.revokeWindow(windowId));
+          }
+          return workspaceImages.open(window.id, workspacePath, filePath);
+        },
         revealWorkspaceFile: async (workspacePath, filePath) => {
           const resolved = await resolveExistingWorkspacePath(workspacePath, filePath);
           shell.showItemInFolder(resolved);

@@ -302,3 +302,172 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.workbench__new-tab {
+  position: relative;
+  flex: none;
+}
+
+.workbench__new-tab-menu {
+  z-index: 20;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.workbench__new-tab-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.workbench__tab .workbench__terminal-status {
+  flex: none;
+}
+
+.workbench__new-tab-item .workspace-menu__shortcut {
+  margin-left: auto;
+}
+
+/* One image file in a Files tab. The checkerboard sits behind the image only, so transparency
+   shows against the theme's own surfaces. */
+.file-image {
+  --file-image-check: color-mix(in srgb, var(--text-strong) 7%, transparent);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+}
+
+.file-image:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.file-image__stage {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+  background: var(--surface-muted);
+}
+
+.file-image__stage--actual {
+  overflow: auto;
+  cursor: grab;
+}
+
+.file-image__stage--actual:active {
+  cursor: grabbing;
+}
+
+.file-image__image {
+  display: block;
+  flex: none;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-2xs);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, var(--file-image-check) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--file-image-check) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--file-image-check) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--file-image-check) 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+  box-shadow: 0 0 0 1px var(--border);
+  user-select: none;
+}
+
+.file-image__stage--actual .file-image__image {
+  max-width: none;
+  max-height: none;
+  image-rendering: pixelated;
+}
+
+.file-image__image[hidden] {
+  display: none;
+}
+
+.file-image__error {
+  margin: auto;
+  color: var(--muted-soft);
+  font-size: 13px;
+}
+
+.file-image__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  flex: none;
+  padding: 0 8px 0 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.file-image__info {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-image__nav,
+.file-image__zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.file-image__button {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.file-image__button:hover:not(:disabled) {
+  background: var(--overlay-hover);
+}
+
+.file-image__button:disabled {
+  opacity: 0.4;
+}
+
+.file-image__button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-tint-bg);
+  color: var(--accent);
+}
+
+.file-editor__no-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-editor__no-preview strong {
+  color: var(--muted-strong);
+  font-weight: 650;
+}

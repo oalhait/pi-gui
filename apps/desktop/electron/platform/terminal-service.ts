@@ -80,6 +80,19 @@ export class TerminalService {
     return this.snapshotRoot(root);
   }
 
+  getPanel(
+    webContents: WebContents,
+    workspaceId: string,
+    terminalScopeId: string,
+  ): TerminalPanelSnapshot | null {
+    const workspacePath = this.options.getWorkspacePath(workspaceId);
+    if (!workspacePath) return null;
+    const root = this.rootsByKey.get(
+      terminalRootKey(webContents, normalizeRootKey(workspacePath), terminalScopeId.trim()),
+    );
+    return root?.sessionIds.length ? this.snapshotRoot(root) : null;
+  }
+
   createSession(
     webContents: WebContents,
     workspaceId: string,
@@ -253,7 +266,7 @@ export class TerminalService {
     }
     ensureDirectory(workspacePath);
     const workspaceRootKey = normalizeRootKey(workspacePath);
-    const rootKey = `${webContents.id}\0${workspaceRootKey}\0${normalizedScopeId}`;
+    const rootKey = terminalRootKey(webContents, workspaceRootKey, normalizedScopeId);
     const existingRoot = this.rootsByKey.get(rootKey);
     if (existingRoot) {
       return existingRoot;
@@ -535,6 +548,14 @@ function ensureNodePtySpawnHelperExecutable(isPackaged: boolean): void {
 function loadNodePty(): NodePty {
   nodePty ??= require("node-pty") as NodePty;
   return nodePty;
+}
+
+function terminalRootKey(
+  webContents: WebContents,
+  workspaceRootKey: string,
+  terminalScopeId: string,
+): string {
+  return `${webContents.id}\0${workspaceRootKey}\0${terminalScopeId}`;
 }
 
 function killUnixProcessGroup(pid: number): void {

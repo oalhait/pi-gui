@@ -1,3 +1,4 @@
+import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "../contracts/workbench-agent";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -42,6 +43,7 @@ import {
 } from "../contracts/ipc";
 import type { ExtensionActionEffect, ExtensionActionRequest } from "../contracts/extension-actions";
 import type { ClipboardImageRead } from "../contracts/composer-attachments";
+import type { WorkspaceImageResult } from "../contracts/workspace-images";
 import type { DesktopEditorList } from "../contracts/editors";
 import type { SaveTaskWorkbenchTemplateInput, TaskWorkbenchTemplate } from "../contracts/workbench";
 import type {
@@ -127,6 +129,12 @@ ipcRenderer.on(desktopIpc.appCommand, (_event, command: PiDesktopCommand) => {
 });
 
 contextBridge.exposeInMainWorld("piApp", {
+  onWorkbenchAgentCancel: (listener: (id: string) => void) =>
+    subscribeIpc(desktopIpc.workbenchAgentCancel, listener),
+  onWorkbenchAgentRequest: (listener: (request: WorkbenchAgentRequest) => void) =>
+    subscribeIpc(desktopIpc.workbenchAgentRequest, listener),
+  respondWorkbenchAgentRequest: (response: WorkbenchAgentResponse) =>
+    ipcRenderer.invoke(desktopIpc.workbenchAgentResponse, response) as Promise<void>,
   attachBrowser: (input: BrowserMount) =>
     ipcRenderer.invoke(desktopIpc.browserAttach, input) as Promise<BrowserPanelState>,
   layoutBrowser: (input: BrowserLayout) =>
@@ -490,6 +498,12 @@ contextBridge.exposeInMainWorld("piApp", {
       terminalScopeId,
       size,
     ) as Promise<TerminalPanelSnapshot>,
+  getTerminalPanel: (workspaceId: string, terminalScopeId: string) =>
+    ipcRenderer.invoke(
+      desktopIpc.terminalGetPanel,
+      workspaceId,
+      terminalScopeId,
+    ) as Promise<TerminalPanelSnapshot | null>,
   createTerminalSession: (
     workspaceId: string,
     terminalScopeId: string,
@@ -617,6 +631,11 @@ contextBridge.exposeInMainWorld("piApp", {
       readonly state: DesktopAppState;
       readonly result: NavigateSessionTreeResult;
     }>,
+  rewindToMessage: (target: WorkspaceSessionTarget, sourceMessageId: string) =>
+    ipcRenderer.invoke(desktopIpc.rewindToMessage, target, sourceMessageId) as Promise<{
+      readonly state: DesktopAppState;
+      readonly result: NavigateSessionTreeResult;
+    }>,
   listWorkspaceFiles: (workspaceId: string, options?: { readonly force?: boolean }) =>
     ipcRenderer.invoke(desktopIpc.listWorkspaceFiles, workspaceId, options) as Promise<string[]>,
   readWorkspaceFile: (workspaceId: string, filePath: string) =>
@@ -625,6 +644,11 @@ contextBridge.exposeInMainWorld("piApp", {
       workspaceId,
       filePath,
     ) as Promise<WorkspaceFilePreview>,
+  openWorkspaceImage: (workspaceId: string, filePath: string) =>
+    ipcRenderer.invoke(desktopIpc.openWorkspaceImage, {
+      workspaceId,
+      filePath,
+    }) as Promise<WorkspaceImageResult>,
   revealWorkspaceFile: (workspaceId: string, filePath: string) =>
     ipcRenderer.invoke(desktopIpc.revealWorkspaceFile, workspaceId, filePath) as Promise<void>,
   getChangedFiles: (workspaceId: string) =>

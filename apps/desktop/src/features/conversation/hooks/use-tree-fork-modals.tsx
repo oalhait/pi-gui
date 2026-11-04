@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import type { SessionTranscriptMessage } from "@pi-gui/session-driver";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { SessionTreeSnapshot } from "@pi-gui/session-driver/types";
 import {
   type AppView,
@@ -65,6 +73,53 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     submitting: false,
     sourceMessageIndex: -1,
   });
+
+  const editingMessage = useRef(false);
+  const editFromMessage = useCallback(
+    (message: SessionTranscriptMessage) => {
+      if (
+        !api ||
+        !selectedWorkspace ||
+        !selectedSession ||
+        selectedSession.status === "running" ||
+        editingMessage.current
+      )
+        return;
+      editingMessage.current = true;
+      // Rewind in place, as pi's /tree does for a user entry: the thread moves to just before
+      // the message, its text returns to the composer, and later turns stay in /tree.
+      void api
+        .rewindToMessage(
+          { workspaceId: selectedWorkspace.id, sessionId: selectedSession.id },
+          message.sourceMessageId ?? message.id,
+        )
+        .then(async ({ state, result }) => {
+          applySnapshotIfNewer(setSnapshot, state);
+          if (result.cancelled || result.aborted) return;
+          setComposerDraft(result.editorText ?? "");
+          if (message.attachments?.length) {
+            const attachments = message.attachments.map((attachment) => ({
+              ...attachment,
+              name: attachment.name ?? "Image",
+              id: crypto.randomUUID(),
+            }));
+            applySnapshotIfNewer(setSnapshot, await api.addComposerAttachments(attachments));
+          }
+          focusComposer();
+        })
+        .catch((error: unknown) => {
+          setSnapshot((current) =>
+            current
+              ? { ...current, lastError: error instanceof Error ? error.message : String(error) }
+              : current,
+          );
+        })
+        .finally(() => {
+          editingMessage.current = false;
+        });
+    },
+    [api, selectedWorkspace, selectedSession, setSnapshot, setComposerDraft, focusComposer],
+  );
 
   const closeTreeModal = useCallback(() => {
     setTreeModalState((current) =>
@@ -252,6 +307,7 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     navigateTreeSelection,
     closeForkModal,
     openForkModal,
+    editFromMessage: selectedSession?.status === "running" ? undefined : editFromMessage,
     handleForkSubmit,
     canUseWorktree: Boolean(rootWorkspace),
   };

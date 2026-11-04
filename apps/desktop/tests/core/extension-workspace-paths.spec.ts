@@ -2,6 +2,7 @@ import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   getDesktopState,
   launchDesktop,
@@ -13,11 +14,7 @@ import {
 import { expectExtensionViewReady } from "../helpers/desktop-extension-fixture";
 
 async function openPathFixture(window: Page): Promise<void> {
-  await window.getByTestId("workbench-add-tab").click();
-  await window
-    .getByTestId("workbench-chooser")
-    .getByRole("button", { name: "Path fixture", exact: true })
-    .click();
+  await chooseNewWorkbenchTab(window, "Path fixture");
   await expectExtensionViewReady(window);
 }
 

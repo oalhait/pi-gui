@@ -1,3 +1,4 @@
+import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "./workbench-agent";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -22,6 +23,7 @@ import type {
   SessionTreeSnapshot,
 } from "@pi-gui/session-driver/types";
 import type { ClipboardImageRead } from "./composer-attachments";
+import type { WorkspaceImageResult } from "./workspace-images";
 import type { DesktopEditorList } from "./editors";
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import type { SaveTaskWorkbenchTemplateInput, TaskWorkbenchTemplate } from "./workbench";
@@ -116,6 +118,9 @@ export type NewMcpServerInput = { readonly name: string; readonly description?: 
 );
 
 export const desktopIpc = {
+  workbenchAgentCancel: "pi-gui:workbench-agent-cancel",
+  workbenchAgentRequest: "pi-gui:workbench-agent-request",
+  workbenchAgentResponse: "pi-gui:workbench-agent-response",
   browserAttach: "pi-gui:browser-attach",
   browserLayout: "pi-gui:browser-layout",
   browserDetach: "pi-gui:browser-detach",
@@ -205,6 +210,7 @@ export const desktopIpc = {
   setIntegratedTerminalShell: "pi-gui:set-integrated-terminal-shell",
   setEnableTransparency: "pi-gui:set-enable-transparency",
   terminalEnsurePanel: "pi-gui:terminal-ensure-panel",
+  terminalGetPanel: "pi-gui:terminal-get-panel",
   terminalCreateSession: "pi-gui:terminal-create-session",
   terminalSetActiveSession: "pi-gui:terminal-set-active-session",
   terminalWrite: "pi-gui:terminal-write",
@@ -236,11 +242,13 @@ export const desktopIpc = {
   submitComposer: "pi-gui:submit-composer",
   getSessionTree: "pi-gui:get-session-tree",
   navigateSessionTree: "pi-gui:navigate-session-tree",
+  rewindToMessage: "pi-gui:rewind-to-message",
   toggleWindowMaximize: "pi-gui:toggle-window-maximize",
   minimizeWindow: "pi-gui:minimize-window",
   closeWindow: "pi-gui:close-window",
   listWorkspaceFiles: "pi-gui:list-workspace-files",
   readWorkspaceFile: "pi-gui:read-workspace-file",
+  openWorkspaceImage: "pi-gui:open-workspace-image",
   revealWorkspaceFile: "pi-gui:reveal-workspace-file",
   getChangedFiles: "pi-gui:get-changed-files",
   getFileDiff: "pi-gui:get-file-diff",
@@ -747,6 +755,9 @@ export function isCloseFocusedSurfaceShortcut(input: {
 export const drawWindowControlsArgument = "--pi-draw-window-controls";
 
 export interface PiDesktopApi {
+  onWorkbenchAgentCancel(listener: (id: string) => void): () => void;
+  onWorkbenchAgentRequest(listener: (request: WorkbenchAgentRequest) => void): () => void;
+  respondWorkbenchAgentRequest(response: WorkbenchAgentResponse): Promise<void>;
   attachBrowser(input: BrowserMount): Promise<BrowserPanelState>;
   layoutBrowser(input: BrowserLayout): Promise<void>;
   detachBrowser(mountId: string): Promise<void>;
@@ -880,6 +891,11 @@ export interface PiDesktopApi {
     terminalScopeId: string,
     size?: Partial<TerminalSize>,
   ): Promise<TerminalPanelSnapshot>;
+  /** This window's live terminals for the chat, without starting one; null when it has none. */
+  getTerminalPanel(
+    workspaceId: string,
+    terminalScopeId: string,
+  ): Promise<TerminalPanelSnapshot | null>;
   createTerminalSession(
     workspaceId: string,
     terminalScopeId: string,
@@ -938,11 +954,18 @@ export interface PiDesktopApi {
     targetId: string,
     options?: NavigateSessionTreeOptions,
   ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
+  /** Rewinds the thread to just before a sent user message so it can be edited and rerun. */
+  rewindToMessage(
+    target: WorkspaceSessionTarget,
+    sourceMessageId: string,
+  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
   listWorkspaceFiles(
     workspaceId: string,
     options?: { readonly force?: boolean },
   ): Promise<string[]>;
   readWorkspaceFile(workspaceId: string, filePath: string): Promise<WorkspaceFilePreview>;
+  /** Checks an image file in the workspace and returns a URL this window can show it with. */
+  openWorkspaceImage(workspaceId: string, filePath: string): Promise<WorkspaceImageResult>;
   revealWorkspaceFile(workspaceId: string, filePath: string): Promise<void>;
   getChangedFiles(workspaceId: string): Promise<ChangedFilesResult>;
   getFileDiff(workspaceId: string, filePath: string): Promise<string>;

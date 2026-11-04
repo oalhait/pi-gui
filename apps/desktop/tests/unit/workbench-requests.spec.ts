@@ -16,10 +16,7 @@ function template(kind: "files" | "changes" | "terminal" = "changes"): TaskWorkb
     visibility: "visible",
     tools: [{ kind }],
     selection: { kind: "tool", toolId: kind },
-    files: {
-      workspaceId: "repo",
-      tabs: { tabs: [], active: null, line: null, lineNonce: 0, retained: [] },
-    },
+    files: { workspaceId: "repo", line: null, lineNonce: 0 },
     changes: { scope: { kind: "uncommitted" }, workspaceId: "repo", selectedPath: null },
   };
 }

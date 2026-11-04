@@ -188,7 +188,7 @@ test("card buttons run through main: a keyed card updates in place, and non-exte
     await expect(card).toContainText("CI failed on main");
     await waitForTimelineLayout(window);
     await card.getByRole("button", { name: /Open failing line/ }).click();
-    await expect(window.getByTestId("file-workbench")).toBeVisible();
+    await expect(window.getByTestId("file-editor")).toBeVisible();
     const lineThree = window.locator('[data-testid="file-line-mark"][data-line="3"]');
     await expect(lineThree).toHaveCount(1);
     await expect(lineThree).toContainText("items.filter");

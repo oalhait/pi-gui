@@ -9,31 +9,21 @@ import {
   makeWorkspace,
 } from "../helpers/electron-app";
 
-async function expectConversationFileExplorerSplit(window: Page): Promise<void> {
+/** The side panel shows one thing at a time beside the conversation. */
+async function expectBesideConversation(window: Page, testId: string): Promise<void> {
   const conversation = window.locator(".canvas--thread");
-  const editor = window.getByTestId("file-editor");
-  const explorer = window.getByTestId("file-explorer");
+  const pane = window.getByTestId(testId);
   await expect(conversation).toBeVisible();
-  await expect(editor).toBeVisible();
-  await expect(explorer).toBeVisible();
-
+  await expect(pane).toBeVisible();
   const conversationBox = await conversation.boundingBox();
-  const editorBox = await editor.boundingBox();
-  const explorerBox = await explorer.boundingBox();
-  expect(conversationBox).not.toBeNull();
-  expect(editorBox).not.toBeNull();
-  expect(explorerBox).not.toBeNull();
-  if (!conversationBox || !editorBox || !explorerBox) {
-    throw new Error("Expected conversation, editor, and explorer boxes");
-  }
-
-  expect(conversationBox.x + conversationBox.width).toBeLessThanOrEqual(editorBox.x + 2);
-  expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(explorerBox.x + 2);
-  expect(Math.abs(editorBox.y - explorerBox.y)).toBeLessThan(8);
+  const paneBox = await pane.boundingBox();
+  if (!conversationBox || !paneBox) throw new Error(`Expected conversation and ${testId} boxes`);
+  expect(conversationBox.x + conversationBox.width).toBeLessThanOrEqual(paneBox.x + 2);
+  expect(paneBox.width).toBeGreaterThan(250);
   await expect(window.locator(".diff-panel")).toHaveCount(0);
 }
 
-test("Files workbench puts the explorer to the right of an open file pane", async () => {
+test("the Files explorer opens each file in its own side panel tab", async () => {
   test.setTimeout(45_000);
   const userDataDir = await makeUserDataDir();
   const workspacePath = await makeWorkspace("plain-files-workspace");
@@ -56,7 +46,8 @@ test("Files workbench puts the explorer to the right of an open file pane", asyn
       "placeholder",
       "Filter files…",
     );
-    await expectConversationFileExplorerSplit(window);
+    await expectBesideConversation(window, "file-explorer");
+    await expect(window.getByTestId("file-editor")).toHaveCount(0);
 
     const tree = window.getByTestId("file-workbench-tree");
     await expect(
@@ -73,13 +64,29 @@ test("Files workbench puts the explorer to the right of an open file pane", asyn
     await tree.locator('.file-workbench__tree-row--file[data-file-path="src/app.ts"]').click();
 
     const editor = window.getByTestId("file-editor");
-    await expect(editor.getByTestId("file-workbench-tab")).toContainText("app.ts");
+    const appTab = window.getByRole("tab", { name: "app.ts", exact: true });
+    await expect(appTab).toHaveAttribute("aria-selected", "true");
+    await expect(appTab).toHaveAttribute("title", /src\/app\.ts/);
+    await expectBesideConversation(window, "file-editor");
+    await expect(window.getByTestId("file-explorer")).toHaveCount(0);
     await expect(editor.getByTestId("file-editor-breadcrumb")).toContainText("src");
     await expect(editor.getByTestId("file-workbench-preview")).toContainText("export const ready");
-    await expect(
-      window.getByTestId("file-explorer").getByTestId("file-workbench-preview"),
-    ).toHaveCount(0);
 
+    // A second file is a second tab; picking the first again focuses its tab.
+    await window.getByRole("tab", { name: "Files", exact: true }).click();
+    await tree.locator('.file-workbench__tree-row--file[data-file-path="README.md"]').click();
+    await expect(window.getByRole("tab", { name: "README.md", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await window.getByRole("tab", { name: "Files", exact: true }).click();
+    await tree.locator('.file-workbench__tree-row--file[data-file-path="src/app.ts"]').click();
+    await expect(appTab).toHaveAttribute("aria-selected", "true");
+    await expect(
+      window.getByRole("tablist", { name: "Workspace tools" }).getByRole("tab"),
+    ).toHaveText(["Review", "Files", "app.ts", "README.md"]);
+
+    await window.getByRole("tab", { name: "Files", exact: true }).click();
     await window.getByTestId("file-workbench-filter").fill("app.ts");
     await expect(
       tree.locator('.file-workbench__tree-row--file[data-file-path="README.md"]'),

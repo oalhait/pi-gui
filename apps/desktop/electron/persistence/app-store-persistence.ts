@@ -18,11 +18,14 @@ import { readJsonWithBackup, writeFileAtomicQueued } from "./atomic-file-write";
 import { decodeAttachments } from "./attachment-store";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { decodeTaskWorkbenchTemplate, type TaskWorkbenchTemplate } from "../../contracts/workbench";
+import {
+  decodeStoredTaskWorkbenchTemplate,
+  type TaskWorkbenchTemplate,
+} from "../../contracts/workbench";
 
 export interface PersistedUiState {
   readonly version?:
-    2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+    2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
   readonly taskWorkbenchTemplatesBySession?: Record<string, TaskWorkbenchTemplate>;
   readonly selectedWorkspaceId?: string;
   readonly selectedSessionId?: string;
@@ -146,7 +149,7 @@ export async function writePersistedUiState(
   const serialized = `${JSON.stringify(
     {
       ...payload,
-      version: 19,
+      version: 20,
     } satisfies PersistedUiState,
     null,
     2,
@@ -155,7 +158,7 @@ export async function writePersistedUiState(
   await writeFileAtomicQueued(uiStateFilePath, serialized, decodePersistedUiState, {
     preserveExistingAs: (validated) => {
       const existing = validated as LegacyPersistedUiState;
-      if (existing.version === 19) return undefined;
+      if (existing.version === 20) return undefined;
       return join(
         dirname(uiStateFilePath),
         `${basename(uiStateFilePath, ".json")}.pre-workbench-v${existing.version ?? "legacy"}.${randomUUID()}.json`,
@@ -175,7 +178,7 @@ function decodeWorkbenchTemplates(value: unknown): Record<string, TaskWorkbenchT
     Object.entries(records).flatMap(([key, template]) => {
       try {
         if (!key || key.length > 8192) throw new Error("Invalid workbench task reference");
-        return [[key, decodeTaskWorkbenchTemplate(template)] as const];
+        return [[key, decodeStoredTaskWorkbenchTemplate(template)] as const];
       } catch (error) {
         console.warn(
           `[app-store] dropped invalid ui-state workbench layout for ${key.slice(0, 200)}:`,
@@ -533,7 +536,7 @@ function toAppView(value: unknown): AppView | undefined {
 }
 
 function toPersistedVersion(value: unknown): NonNullable<PersistedUiState["version"]> | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 2 && value <= 19
+  return typeof value === "number" && Number.isInteger(value) && value >= 2 && value <= 20
     ? (value as NonNullable<PersistedUiState["version"]>)
     : undefined;
 }

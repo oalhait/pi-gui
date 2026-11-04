@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type FrameLocator, type Page } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   launchDesktop,
   makeUserDataDir,
@@ -23,9 +24,7 @@ async function openExample(window: Page, title: string): Promise<FrameLocator> {
   const tab = workbench.getByRole("tab", { name: title, exact: true });
   if (await tab.count()) await tab.click();
   else {
-    const chooser = window.getByTestId("workbench-chooser");
-    if (!(await chooser.isVisible())) await window.getByTestId("workbench-add-tab").click();
-    await chooser.getByRole("button", { name: title, exact: true }).click();
+    await chooseNewWorkbenchTab(window, title);
   }
   const frame = window.frameLocator('[data-testid="extension-view-frame"]');
   await expect(frame.getByRole("heading", { name: title, exact: true })).toBeVisible();
@@ -235,7 +234,7 @@ test("the actual PR Review example records a Pi review, opens files, prepares a 
       .info()
       .attach("PR Review actual example", { path: screenshot, contentType: "image/png" });
     await frame.getByRole("button", { name: "search.ts:1", exact: true }).click();
-    await expect(window.getByTestId("file-workbench")).toBeVisible();
+    await expect(window.getByTestId("file-editor")).toBeVisible();
     await expect(window.locator('[data-testid="file-line-mark"][data-line="1"]')).toContainText(
       "export const search",
     );

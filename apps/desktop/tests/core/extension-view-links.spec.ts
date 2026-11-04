@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   getDesktopState,
   launchDesktop,
@@ -97,11 +98,7 @@ test("an extension view opens https links and threads beside its own", async () 
 
     if (!(await window.getByTestId("workbench").isVisible()))
       await window.getByTestId("toggle-side-panel").click();
-    await window.getByTestId("workbench-add-tab").click();
-    await window
-      .getByTestId("workbench-chooser")
-      .getByRole("button", { name: "Links", exact: true })
-      .click();
+    await chooseNewWorkbenchTab(window, "Links");
     await expectExtensionViewReady(window);
     const frame = window.frameLocator('[data-testid="extension-view-frame"]');
     const status = frame.getByRole("status");

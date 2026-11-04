@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
@@ -36,6 +36,7 @@ import {
   DiffIcon,
   FileIcon,
   ForkIcon,
+  PencilIcon,
   SparkIcon,
   TerminalIcon,
 } from "../../ui/icons";
@@ -48,6 +49,7 @@ export function TimelineItem({
   onViewFileInDiff,
   sourceMessageIndex,
   onForkFromMessage,
+  onEditFromMessage,
   onOpenTurnChange,
   scheduledOrigin,
   workspacePath,
@@ -61,6 +63,7 @@ export function TimelineItem({
   readonly onToggleToolCall?: (callId: string) => void;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly sourceMessageIndex?: number;
+  readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
   readonly onForkFromMessage?: (messageIndex: number, preview?: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
   readonly scheduledOrigin?: ScheduledTaskOrigin;
@@ -83,6 +86,7 @@ export function TimelineItem({
           item={item}
           sourceMessageIndex={sourceMessageIndex}
           onForkFromMessage={onForkFromMessage}
+          onEditFromMessage={onEditFromMessage}
           onOpenWorkspaceFileLine={onOpenWorkspaceFileLine}
           scheduledOrigin={scheduledOrigin}
           workspacePath={workspacePath}
@@ -131,6 +135,7 @@ function TimelineMessage({
   item,
   sourceMessageIndex,
   onForkFromMessage,
+  onEditFromMessage,
   scheduledOrigin,
   workspacePath,
   onOpenWorkspaceFileLine,
@@ -139,6 +144,7 @@ function TimelineMessage({
 }: {
   readonly item: SessionTranscriptMessage;
   readonly sourceMessageIndex?: number;
+  readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
   readonly onForkFromMessage?: (messageIndex: number, preview?: string) => void;
   readonly scheduledOrigin?: ScheduledTaskOrigin;
   readonly workspacePath?: string;
@@ -147,6 +153,7 @@ function TimelineMessage({
   readonly onOpenAnnotation?: OpenAnnotation;
 }) {
   const articleRef = useRef<HTMLElement | null>(null);
+  const [copyState, setCopyState] = useState("Copy message");
   const crossProject = useMemo(
     () => (item.role === "user" ? parseCrossProjectMessage(item.text) : null),
     [item.role, item.text],
@@ -208,6 +215,49 @@ function TimelineMessage({
             ) : null}
             {annotated ? <SentAnnotations annotations={annotated.annotations} /> : null}
             {annotated && !body.trim() ? null : <MessageMarkdown annotationRoot text={body} />}
+          </div>
+          <div className="timeline-item__actions timeline-item__actions--user">
+            {Number.isFinite(Date.parse(item.createdAt)) ? (
+              <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>
+                {new Date(item.createdAt).toLocaleString(undefined, {
+                  weekday: "long",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </time>
+            ) : null}
+            <button
+              type="button"
+              className="timeline-item__action"
+              aria-label={copyState}
+              title={copyState}
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(body)
+                  .then(() => setCopyState("Copied"))
+                  .catch(() => setCopyState("Copy failed. Try again"));
+              }}
+              onBlur={() => setCopyState("Copy message")}
+            >
+              <CopyIcon />
+            </button>
+            <button
+              type="button"
+              className="timeline-item__action"
+              aria-label="Edit message"
+              title={
+                onEditFromMessage
+                  ? "Edit this message and rerun the thread from here"
+                  : "Editing is available when the run finishes"
+              }
+              disabled={!onEditFromMessage}
+              onClick={() => onEditFromMessage?.(item)}
+            >
+              <PencilIcon />
+            </button>
+            <span className="sr-only" role="status">
+              {copyState === "Copy message" ? "" : copyState}
+            </span>
           </div>
         </div>
         {markers}

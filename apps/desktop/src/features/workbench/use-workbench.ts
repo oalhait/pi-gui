@@ -1,13 +1,15 @@
+import { useWorkbenchAgent } from "./use-workbench-agent";
 import { useBrowserWorkbench } from "./use-browser-workbench";
+import { useTerminalWorkbench } from "./use-terminal-workbench";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import type { PiDesktopApi } from "../../../contracts/ipc";
 import type { TaskWorkbenchTemplate, ToolRef } from "../../../contracts/workbench";
-import type { FileWorkbenchTabs } from "./file-workbench-state";
 import {
   activeWorkbenchTool,
   applyWorkbenchActions,
   initialWorkbenchView,
+  openFilePaths,
   restoreWorkbenchView,
   type WorkbenchAction,
   type WorkspaceFileReference,
@@ -20,6 +22,8 @@ interface WorkbenchEntry {
   pendingActions: WorkbenchAction[];
   latestSave: number;
   error: string;
+  /** The file tab shown most recently; this window only, so the tree can reveal it. */
+  lastFile: string | null;
 }
 
 interface UseWorkbenchOptions {
@@ -66,6 +70,7 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
       pendingActions: [],
       latestSave: 0,
       error: "",
+      lastFile: null,
     };
     entries.current.set(key, entry);
     return entry;
@@ -151,6 +156,8 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
       }
       if (next === entry.view && entry.restore === "ready") return;
       entry.view = next;
+      const selected = activeWorkbenchTool(next);
+      if (selected?.kind === "file") entry.lastFile = selected.path;
       if (entry.restore !== "ready") {
         entry.pendingActions.push(...actions);
         publish();
@@ -182,7 +189,6 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
     (toolId: string) => dispatch({ type: "close-tool", toolId }),
     [dispatch],
   );
-  const showChooser = useCallback(() => dispatch({ type: "show-chooser" }), [dispatch]);
   const setVisibility = useCallback(
     (visibility: "visible" | "hidden") => dispatch({ type: "set-visibility", visibility }),
     [dispatch],
@@ -197,18 +203,24 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
     });
   }, [dispatch, ensureEntry]);
 
-  const setFiles = useCallback(
-    (update: SetStateAction<FileWorkbenchTabs>, checkoutId?: string) => {
+  /** Opens a file listed in this layout's checkout, such as a click in the file tree. */
+  const openFileTab = useCallback(
+    (path: string) => {
       const ref = current.current.target;
       if (!ref) return;
-      const entry = ensureEntry(ref);
-      const files = entry.view.files;
-      const nextTabs = typeof update === "function" ? update(files.tabs) : update;
-      const nextWorkspaceId = checkoutId ?? files.workspaceId;
-      if (nextTabs === files.tabs && nextWorkspaceId === files.workspaceId) return;
-      apply(ref, [{ type: "set-files", files: { workspaceId: nextWorkspaceId, tabs: nextTabs } }]);
+      const workspaceId = ensureEntry(ref).view.files.workspaceId;
+      apply(ref, [{ type: "open-file", file: { workspaceId, path } }]);
     },
     [apply, ensureEntry],
+  );
+
+  /** Shows another file of this checkout in an open file's tab, such as the next image. */
+  const replaceFileTab = useCallback(
+    (from: string, to: string) => {
+      const ref = current.current.target;
+      if (ref) apply(ref, [{ type: "replace-file", from, to }]);
+    },
+    [apply],
   );
 
   const setChanges = useCallback(
@@ -229,11 +241,12 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
   );
 
   const openFile = useCallback(
-    async (file: WorkspaceFileReference): Promise<void> => {
+    async (file: WorkspaceFileReference, beforeApply?: () => void): Promise<void> => {
       const { target: ref, api: desktopApi } = current.current;
       if (!ref || !desktopApi) return;
       // Host validation must succeed before a transcript link changes any tab state.
       await desktopApi.readWorkspaceFile(file.workspaceId, file.path);
+      beforeApply?.();
       // The link belongs to the task shown when it was opened; a task switch during the read cancels it.
       const latest = current.current.target;
       if (!latest || targetKey(latest) !== targetKey(ref)) return;
@@ -249,18 +262,23 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
 
   const entry = target ? entries.current.get(targetKey(target)) : undefined;
   const view = entry?.view ?? initialWorkbenchView(target?.workspaceId ?? "");
+  const files = openFilePaths(view);
   return {
     view,
+    /** Paths of the open file tabs, in tab order. */
+    openFiles: files,
+    lastOpenedFile:
+      entry?.lastFile && files.includes(entry.lastFile) ? entry.lastFile : (files.at(-1) ?? null),
     activeTool: activeWorkbenchTool(view),
     ready: entry?.restore === "ready",
     error: entry?.error ?? "",
     openTool,
     activateTool,
     closeTool,
-    showChooser,
     setVisibility,
     toggleVisibility,
-    setFiles,
+    openFileTab,
+    replaceFileTab,
     setChanges,
     openFile,
     retryRestore,
@@ -270,5 +288,8 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
 export type WorkbenchLayout = ReturnType<typeof useWorkbenchLayout>;
 export function useWorkbench(options: UseWorkbenchOptions) {
   const layout = useWorkbenchLayout(options);
-  return useBrowserWorkbench(options.api, options.target, layout);
+  const browser = useBrowserWorkbench(options.api, options.target, layout);
+  const workbench = useTerminalWorkbench(options.api, options.target, browser);
+  useWorkbenchAgent(options.api, options.target, workbench);
+  return workbench;
 }

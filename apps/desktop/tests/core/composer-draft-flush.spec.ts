@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   getDesktopState,
   launchDesktop,
@@ -338,11 +339,7 @@ test("keeps a draft when an extension view opens another thread straight after t
   try {
     if (!(await window.getByTestId("workbench").isVisible()))
       await window.getByTestId("toggle-side-panel").click();
-    await window.getByTestId("workbench-add-tab").click();
-    await window
-      .getByTestId("workbench-chooser")
-      .getByRole("button", { name: "Thread links", exact: true })
-      .click();
+    await chooseNewWorkbenchTab(window, "Thread links");
     await expectExtensionViewReady(window);
     const frame = window.frameLocator('[data-testid="extension-view-frame"]');
     await frame.getByLabel("Thread id").fill(targetId);

@@ -40,7 +40,9 @@ test("Review and Terminal share one side workspace while the composer stays avai
     await window.getByRole("tab", { name: "Review", exact: true }).click();
     await expect(changes).toBeVisible();
     await expect(terminal).toHaveCount(0);
-    await expect(window.getByRole("tab", { name: "Terminal", exact: true })).toHaveCount(1);
+    await expect(
+      window.locator('[role="tab"][data-testid^="workbench-tab-terminal:"]'),
+    ).toHaveCount(1);
     await expect(window.getByTestId("composer")).toBeVisible();
   } finally {
     await harness.close();

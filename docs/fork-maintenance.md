@@ -18,6 +18,40 @@ The main process persists pages and the selected page per chat in `browser-tabs.
 One saved Browser tool slot supplies all of that chat’s website tabs in the workbench row. Switching to another tool hides the native page without closing it.
 Existing browser tabs and their saved website logins are retained.
 
+## Agent side pane controls
+
+The built-in `workbench` tool lets Pi agents open browser pages and Files, Review, Terminal or
+extension tabs, inspect/select/close tabs, navigate pages and show/hide the side pane.
+It uses pi-gui’s own controllers, so it does not require macOS Accessibility or Screen Recording.
+
+The main process derives the requesting chat from Pi’s session context and accepts responses
+only from that chat’s owned app window. The requesting chat must be selected in a pi-gui window; the window does not have to be focused.
+Requests for a chat that is not selected in any window fail without switching the user to it. Cancellation is checked before deferred
+file opens, and browser navigation retains the exact page ID across delayed replies. Use `list` to
+obtain `tab_id` for an existing browser page; without it, navigation targets the selected browser tab.
+This tool manages the application’s pane; it does not provide web page DOM automation.
+
+`capture` (optional `tab_id`, default the selected tab) is read-only. For a browser tab it
+captures the page’s own contents (`capturePage` on its view, not the window), so it works with
+pi-gui in the background or covered, and returns url, title, loading/error state and viewport.
+Blank and failed pages return no image and say why; a page the user is not looking at (other tab
+selected, pane hidden, overlay open) is still captured and marked `visible_to_user: false`. Files,
+Review, Terminal and extension tabs capture only the pane’s rectangle, plus a short description,
+and only while selected and visible. Images are downscaled to a 1600px longest edge and kept in
+memory; tool details never contain image bytes. Pi does persist the returned image in the
+session transcript like any other tool-result image.
+
+`read` (browser tabs only, optional `tab_id`) returns the page’s url, title, visible text (12,000
+characters), headings (50), visible links (100) and form fields (50), each item capped. It runs a
+script with `executeJavaScriptInIsolatedWorld`, so it shares the DOM but none of the page’s
+JavaScript and nothing of pi-gui; main rebuilds the answer with known fields and caps. Password,
+file, hidden and credit-card/one-time-code fields never return values. `format: "html"` adds raw
+HTML capped at 60,000 characters. The script has a 5-second deadline.
+
+The tool is registered with `exposure: "direct"`, so it is declared from session start and stays
+declared when a deferred MCP server (such as Slack) activates `tool_search` or extensions reload;
+the unit regression in `tests/unit/workbench-agent.spec.ts` covers this.
+
 ## Compatibility and backups
 
 Keep the `com.pi-gui.desktop` app ID, `pi` userData directory, `~/.pi/agent` directory,

@@ -4,7 +4,9 @@ import type { TranscriptMessage } from "../../contracts/timeline-types";
 import { createConversationOwner } from "../../electron/conversation/app-store-composer";
 import {
   appendAssistantDelta,
+  appendUserMessage,
   applyTimelineEvent,
+  trackUnpersistedUserMessage,
 } from "../../electron/conversation/app-store-timeline";
 
 const sessionRef = { workspaceId: "workspace", sessionId: "session" };
@@ -16,6 +18,7 @@ function fixture() {
   const state: Parameters<typeof applyTimelineEvent>[2] = {
     activeAssistantMessageBySession: new Map(),
     pendingAssistantMessageBySession: new Map(),
+    unpersistedUserMessagesBySession: new Map(),
     extensionToolLabels: () => new Map(),
     runningSinceBySession: new Map(),
     runMetricsBySession: new Map(),
@@ -213,4 +216,32 @@ test("a malformed pin's error row goes above the streaming reply and updates in 
   expect(
     h.transcript.get(key)!.map((row) => (row.kind === "custom" ? row.text : row.kind)),
   ).toEqual(["second", "message"]);
+});
+
+test("persisted user entry IDs attach to the live user rows they were sent as, in order", () => {
+  const h = fixture();
+  const track = (text: string) => {
+    const id = appendUserMessage(h.transcript, sessionRef, text);
+    trackUnpersistedUserMessage(h.state.unpersistedUserMessagesBySession, sessionRef, id);
+    return id;
+  };
+  const userPersisted = (sourceMessageId: string, text: string) =>
+    h.send({ type: "userMessagePersisted", sessionRef, timestamp, sourceMessageId, text });
+  const first = track("continue");
+  const second = track("continue");
+  const skill = track("/skill:review the diff");
+  userPersisted("entry-first", "continue");
+  userPersisted("entry-second", "continue");
+  // Pi expanded the skill, so the persisted text differs; the oldest waiting row takes it.
+  userPersisted("entry-skill", "<skill>…</skill> the diff");
+  userPersisted("entry-stray", "continue");
+  const sourceIds = new Map(
+    h.transcript
+      .get(key)!
+      .map((item) => [item.id, item.kind === "message" ? item.sourceMessageId : undefined]),
+  );
+  expect(sourceIds.get(first)).toBe("entry-first");
+  expect(sourceIds.get(second)).toBe("entry-second");
+  expect(sourceIds.get(skill)).toBe("entry-skill");
+  expect(h.state.unpersistedUserMessagesBySession.get(key)).toEqual([]);
 });

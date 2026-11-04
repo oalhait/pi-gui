@@ -1,7 +1,9 @@
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import { decodeReviewScope, type ReviewScope } from "./review";
 
+/** Open file tabs; each file is its own top-level tab. */
 export const MAX_WORKBENCH_FILE_TABS = 100;
+/** Every other saved tab: built-in tools and extension views. */
 export const MAX_WORKBENCH_TOOLS = 32;
 
 /** Every built-in tool; its presentation table must cover each kind. */
@@ -14,13 +16,27 @@ export function isBuiltinToolKind(value: unknown): value is BuiltinToolKind {
   return (BUILTIN_TOOL_KINDS as readonly unknown[]).includes(value);
 }
 
+/**
+ * One top-level tab. `files` is the explorer; each open file is a `file` tab. Browser pages and
+ * terminals live in their main-process owners: a layout saves one `browser`/`terminal` slot and
+ * the live tab row expands it into one tab per page or terminal.
+ */
 export type ToolRef =
-  | { readonly kind: Exclude<BuiltinToolKind, "browser"> }
+  | { readonly kind: "files" | "changes" }
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "terminal"; readonly sessionId?: string }
   | { readonly kind: "browser"; readonly pageId?: string }
   | { readonly kind: "extension"; readonly extensionId: string; readonly viewId: string };
 
 export type ToolSelection =
   { readonly kind: "chooser" } | { readonly kind: "tool"; readonly toolId: string };
+
+/** A line range highlighted in one open file tab, from a transcript or extension link. */
+export interface FileLineMark {
+  readonly path: string;
+  readonly start: number;
+  readonly end: number;
+}
 
 /** References and small view preferences only; never file, diff, terminal or extension content. */
 export interface TaskWorkbenchTemplate {
@@ -28,14 +44,11 @@ export interface TaskWorkbenchTemplate {
   readonly tools: readonly ToolRef[];
   readonly selection: ToolSelection;
   readonly files: {
+    /** The checkout every file tab and the explorer read from. */
     readonly workspaceId: string;
-    readonly tabs: {
-      readonly tabs: readonly string[];
-      readonly active: string | null;
-      readonly line: { readonly start: number; readonly end: number } | null;
-      readonly lineNonce: number;
-      readonly retained: readonly string[];
-    };
+    readonly line: FileLineMark | null;
+    /** Increments for each line link, so reopening the same range scrolls to it again. */
+    readonly lineNonce: number;
   };
   readonly changes: {
     readonly workspaceId: string;
@@ -52,22 +65,49 @@ export interface SaveTaskWorkbenchTemplateInput {
 }
 
 export function toolRefId(tool: ToolRef): string {
-  return tool.kind === "extension"
-    ? JSON.stringify(["extension", tool.extensionId, tool.viewId])
-    : tool.kind === "browser" && tool.pageId
-      ? `browser:${tool.pageId}`
-      : tool.kind;
+  switch (tool.kind) {
+    case "extension":
+      return JSON.stringify(["extension", tool.extensionId, tool.viewId]);
+    case "file":
+      return `file:${tool.path}`;
+    case "browser":
+      return tool.pageId ? `browser:${tool.pageId}` : tool.kind;
+    case "terminal":
+      return tool.sessionId ? `terminal:${tool.sessionId}` : tool.kind;
+    default:
+      return tool.kind;
+  }
 }
 
 /** Shared by the disk reader and IPC boundary so neither can accept a wider schema. */
 export function decodeTaskWorkbenchTemplate(value: unknown): TaskWorkbenchTemplate {
+  return decodeTemplate(value, false);
+}
+
+/**
+ * The disk reader also accepts the v19 shape, where one Files tab held a strip of file
+ * sub-tabs, and returns it with each of those files as its own top-level tab.
+ */
+export function decodeStoredTaskWorkbenchTemplate(value: unknown): TaskWorkbenchTemplate {
+  return decodeTemplate(value, true);
+}
+
+function decodeTemplate(value: unknown, allowLegacy: boolean): TaskWorkbenchTemplate {
   const root = record(value, ["visibility", "tools", "selection", "files", "changes"]);
   if (root.visibility !== "visible" && root.visibility !== "hidden") fail("visibility");
-  if (!Array.isArray(root.tools) || root.tools.length > MAX_WORKBENCH_TOOLS) fail("tools");
+  const filesRecord = record(root.files, ["workspaceId", "tabs", "line", "lineNonce"]);
+  const legacy = filesRecord.tabs !== undefined;
+  if (legacy && !allowLegacy) fail("unsupported field");
+  if (
+    !Array.isArray(root.tools) ||
+    root.tools.length > MAX_WORKBENCH_TOOLS + MAX_WORKBENCH_FILE_TABS
+  )
+    fail("tools");
   const retired = new Set<string>();
-  const tools: ToolRef[] = root.tools.flatMap((value: unknown): ToolRef[] => {
-    const tool = record(value, ["kind", "extensionId", "viewId"]);
+  let tools: ToolRef[] = root.tools.flatMap((value: unknown): ToolRef[] => {
+    const tool = record(value, ["kind", "extensionId", "viewId", "path"]);
     if (tool.kind === "extension") {
+      if (tool.path !== undefined) fail("unsupported field");
       return [
         {
           kind: "extension",
@@ -76,7 +116,12 @@ export function decodeTaskWorkbenchTemplate(value: unknown): TaskWorkbenchTempla
         },
       ];
     }
-    if (tool.extensionId !== undefined || tool.viewId !== undefined) fail("builtin tool fields");
+    if (tool.kind === "file" && !legacy) {
+      if (tool.extensionId !== undefined || tool.viewId !== undefined) fail("file tool fields");
+      return [{ kind: "file", path: text(tool.path) }];
+    }
+    if (tool.extensionId !== undefined || tool.viewId !== undefined || tool.path !== undefined)
+      fail("builtin tool fields");
     if (RETIRED_TOOL_KINDS.includes(tool.kind)) {
       retired.add(tool.kind as string);
       return [];
@@ -84,9 +129,33 @@ export function decodeTaskWorkbenchTemplate(value: unknown): TaskWorkbenchTempla
     if (!isBuiltinToolKind(tool.kind)) fail("tool kind");
     return [{ kind: tool.kind }];
   });
+  let selected = record(root.selection, ["kind", "toolId"]);
+  let files: TaskWorkbenchTemplate["files"];
+  if (legacy) {
+    const migrated = migrateLegacyFiles(filesRecord, tools, selected);
+    tools = migrated.tools;
+    selected = migrated.selection;
+    files = migrated.files;
+  } else {
+    let line: FileLineMark | null = null;
+    if (filesRecord.line !== null) {
+      const mark = record(filesRecord.line, ["path", "start", "end"]);
+      const start = integer(mark.start, 1);
+      line = { path: text(mark.path), start, end: integer(mark.end, start) };
+    }
+    files = {
+      workspaceId: text(filesRecord.workspaceId),
+      line,
+      lineNonce: integer(filesRecord.lineNonce),
+    };
+  }
+  const fileCount = tools.filter((tool) => tool.kind === "file").length;
+  if (fileCount > MAX_WORKBENCH_FILE_TABS || tools.length - fileCount > MAX_WORKBENCH_TOOLS)
+    fail("tools");
   const identities = new Set(tools.map(toolRefId));
   if (identities.size !== tools.length) fail("duplicate tool");
-  const selected = record(root.selection, ["kind", "toolId"]);
+  if (files.line && !identities.has(toolRefId({ kind: "file", path: files.line.path })))
+    fail("line without open file");
   let selection: ToolSelection;
   if (selected.kind === "chooser" && selected.toolId === undefined) {
     selection = { kind: "chooser" };
@@ -105,35 +174,67 @@ export function decodeTaskWorkbenchTemplate(value: unknown): TaskWorkbenchTempla
   } else {
     fail("selection");
   }
-  const files = record(root.files, ["workspaceId", "tabs"]);
+  const changes = record(root.changes, ["workspaceId", "selectedPath", "scope"]);
+  return {
+    visibility: root.visibility,
+    tools,
+    selection,
+    files,
+    changes: {
+      workspaceId: text(changes.workspaceId),
+      selectedPath: changes.selectedPath === null ? null : text(changes.selectedPath),
+      scope:
+        changes.scope === undefined ? { kind: "uncommitted" } : decodeReviewScope(changes.scope),
+    },
+  };
+}
+
+/**
+ * v19 kept open files inside the Files tab. Each becomes a top-level file tab directly after the
+ * explorer, in strip order; the strip's selected file becomes the selected tab when Files was.
+ * Files of a closed Files tab were already hidden, so they are not resurrected as tabs.
+ */
+function migrateLegacyFiles(
+  files: Record<string, unknown>,
+  tools: readonly ToolRef[],
+  selection: Record<string, unknown>,
+): {
+  tools: ToolRef[];
+  selection: Record<string, unknown>;
+  files: TaskWorkbenchTemplate["files"];
+} {
+  if (files.line !== undefined || files.lineNonce !== undefined) fail("unsupported field");
   const tabs = record(files.tabs, ["tabs", "active", "line", "lineNonce", "retained"]);
   const paths = pathsList(tabs.tabs);
   const retained = pathsList(tabs.retained);
   const active = tabs.active === null ? null : text(tabs.active);
   if (active !== null && !paths.includes(active)) fail("active file");
   if (retained.some((path) => !paths.includes(path))) fail("retained file");
-  let line: { start: number; end: number } | null = null;
+  let line: FileLineMark | null = null;
   if (tabs.line !== null) {
     const mark = record(tabs.line, ["start", "end"]);
     const start = integer(mark.start, 1);
     const end = integer(mark.end, start);
     if (active === null) fail("line without active file");
-    line = { start, end };
+    line = { path: active, start, end };
   }
-  const changes = record(root.changes, ["workspaceId", "selectedPath", "scope"]);
+  const explorer = tools.findIndex((tool) => tool.kind === "files");
+  const fileTabs = paths.map((path): ToolRef => ({ kind: "file", path }));
+  const nextTools =
+    explorer < 0
+      ? [...tools]
+      : [...tools.slice(0, explorer + 1), ...fileTabs, ...tools.slice(explorer + 1)];
+  const kept = explorer >= 0;
   return {
-    visibility: root.visibility,
-    tools,
-    selection,
+    tools: nextTools,
+    selection:
+      kept && active !== null && selection.kind === "tool" && selection.toolId === "files"
+        ? { kind: "tool", toolId: toolRefId({ kind: "file", path: active }) }
+        : selection,
     files: {
       workspaceId: text(files.workspaceId),
-      tabs: { tabs: paths, active, line, lineNonce: integer(tabs.lineNonce), retained },
-    },
-    changes: {
-      workspaceId: text(changes.workspaceId),
-      selectedPath: changes.selectedPath === null ? null : text(changes.selectedPath),
-      scope:
-        changes.scope === undefined ? { kind: "uncommitted" } : decodeReviewScope(changes.scope),
+      line: kept ? line : null,
+      lineNonce: integer(tabs.lineNonce),
     },
   };
 }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
+  chooseNewWorkbenchTab,
   createNamedThread,
   desktopShortcut,
   getDesktopState,
@@ -18,7 +19,7 @@ import {
 const TERMINAL_PASTE_SHORTCUT =
   process.platform === "linux" ? "Control+Shift+V" : desktopShortcut("V");
 
-test("opens task terminals with persistent output and independent shell tabs", async () => {
+test("opens task terminals with persistent output, one top-level tab per shell", async () => {
   test.setTimeout(90_000);
 
   const userDataDir = await makeUserDataDir();
@@ -35,8 +36,13 @@ test("opens task terminals with persistent output and independent shell tabs", a
 
     await selectSidePanel(window, "Terminal");
     const terminal = window.getByTestId("integrated-terminal");
+    // Terminals are side panel tabs; the panel itself has no sub-tabs.
+    const terminalTabs = window.locator(
+      '#task-workbench [role="tab"][data-testid^="workbench-tab-terminal"]',
+    );
     await expect(terminal).toBeVisible();
-    await expect(window.getByTestId("terminal-tab")).toHaveCount(1);
+    await expect(terminalTabs).toHaveCount(1);
+    await expect(terminal.getByRole("tab")).toHaveCount(0);
 
     await terminal.locator(".xterm").click();
     await window.keyboard.type("printf 'PI_TERMINAL_OK\\n'; pwd");
@@ -87,22 +93,24 @@ test("opens task terminals with persistent output and independent shell tabs", a
       .poll(async () => (await getDesktopState(window)).composerAttachments.length)
       .toBe(0);
 
-    await window.getByLabel("New terminal").click();
-    await expect(window.getByTestId("terminal-tab")).toHaveCount(2);
+    await chooseNewWorkbenchTab(window, "Terminal");
+    await expect(terminalTabs).toHaveCount(2);
     await window.getByTestId("integrated-terminal").locator(".xterm").click();
     await window.keyboard.press(desktopShortcut("T"));
-    await expect(window.getByTestId("terminal-tab")).toHaveCount(3);
+    await expect(terminalTabs).toHaveCount(3);
+    await expect(terminalTabs.last()).toHaveAttribute("aria-selected", "true");
 
     await expect(window.getByTestId("composer")).toBeVisible();
 
     // Shells rename tabs through OSC titles (Ubuntu's bashrc sets user@host: dir), so
-    // target the panel's own close buttons rather than the "Terminal N" label.
-    await window
-      .getByRole("tablist", { name: "Terminal sessions" })
-      .locator(".terminal-panel__tab-close")
-      .last()
-      .click();
-    await expect(window.getByTestId("terminal-tab")).toHaveCount(2);
+    // target the tab's close button rather than the "Terminal N" label.
+    await terminalTabs.last().locator("..").locator(".workbench__tab-close").click();
+    await expect(terminalTabs).toHaveCount(2);
+    // The output of the first terminal survived opening and closing the others.
+    await terminalTabs.first().click();
+    await expect(window.getByTestId("integrated-terminal").locator(".xterm-rows")).toContainText(
+      "PI_TERMINAL_OK",
+    );
   } finally {
     await harness.close();
   }

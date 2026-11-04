@@ -123,6 +123,7 @@ type ConversationOwner = Pick<
   | "reportExtensionActionFailure"
   | "getSessionTree"
   | "navigateSessionTree"
+  | "rewindToMessage"
   | "respondToHostUiRequest"
   | "setSessionModel"
   | "setSessionThinkingLevel"
@@ -215,6 +216,11 @@ export interface DesktopIpcCapabilities {
     options?: { readonly force?: boolean },
   ) => Promise<readonly unknown[]>;
   readonly readWorkspaceFile: (workspacePath: string, filePath: string) => Promise<unknown>;
+  readonly openWorkspaceImage: (
+    window: BrowserWindow,
+    workspacePath: string,
+    filePath: string,
+  ) => Promise<unknown>;
   readonly revealWorkspaceFile: (workspacePath: string, filePath: string) => Promise<void>;
   readonly getChangedFiles: (workspacePath: string) => Promise<ChangedFilesResult>;
   readonly getFileDiff: (workspacePath: string, filePath: string) => Promise<string>;
@@ -986,8 +992,31 @@ export function registerDesktopIpc({
       );
     },
   );
+  ipcMain.handle(desktopIpc.rewindToMessage, (event, rawTarget: unknown, rawId: unknown) => {
+    const window = senderWindow(windows, event);
+    const target = expectSessionTarget(rawTarget);
+    const sourceMessageId = expectNonEmptyString(rawId, "sourceMessageId");
+    return windows.runStateResultAction(window, () =>
+      owners.conversation.rewindToMessage(target, sourceMessageId),
+    );
+  });
 
   registerWorkspaceFileIpc(windows, owners.workspace, capabilities);
+  handleMainFrame(
+    desktopIpc.openWorkspaceImage,
+    (raw) => {
+      const input = expectRecord(raw, "image");
+      return {
+        workspaceId: expectNonEmptyString(input.workspaceId, "workspaceId"),
+        filePath: expectNonEmptyString(input.filePath, "filePath"),
+      };
+    },
+    ({ workspaceId, filePath }, request) => {
+      const workspacePath = owners.workspace.getWorkspacePath(workspaceId);
+      if (!workspacePath) throw new Error(`Unknown workspace: ${workspaceId}`);
+      return capabilities.openWorkspaceImage(request.window, workspacePath, filePath);
+    },
+  );
   ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {
     const window = senderWindow(windows, event);
     if (window.isMaximized()) {
@@ -1016,6 +1045,17 @@ function registerTerminalIpc(windows: WindowOwner, capabilities: DesktopIpcCapab
           expectNonEmptyString(rawScopeId, "terminalScopeId"),
           expectTerminalSize(rawSize),
         ),
+  );
+  ipcMain.handle(
+    desktopIpc.terminalGetPanel,
+    (event, rawWorkspaceId: unknown, rawScopeId: unknown) =>
+      capabilities
+        .optionalTerminal()
+        ?.getPanel(
+          windows.windowForSender(event.sender).webContents,
+          expectNonEmptyString(rawWorkspaceId, "workspaceId"),
+          expectNonEmptyString(rawScopeId, "terminalScopeId"),
+        ) ?? null,
   );
   ipcMain.handle(
     desktopIpc.terminalCreateSession,

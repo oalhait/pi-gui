@@ -1,33 +1,25 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
-import type { WorkspaceRecord, WorktreeRecord } from "../../../contracts/desktop-state";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { WorkspaceRecord } from "../../../contracts/desktop-state";
 import type { PiDesktopApi } from "../../../contracts/ipc";
-import { FileEditorPane } from "./file-editor-pane";
 import { FileExplorer } from "./file-explorer";
-import { activateFile, closeFile, openFile, type FileWorkbenchTabs } from "./file-workbench-state";
 
 interface FileWorkbenchProps {
   readonly api: PiDesktopApi;
   readonly workspace: WorkspaceRecord;
-  readonly worktree: WorktreeRecord | undefined;
   readonly sessionStatus: string | undefined;
-  readonly tabs: FileWorkbenchTabs;
-  readonly onTabsChange: Dispatch<SetStateAction<FileWorkbenchTabs>>;
+  /** The file tab most recently shown, revealed in the tree. */
+  readonly selectedPath: string | null;
+  /** Opens or focuses the file's own tab. */
+  readonly onOpenFile: (path: string) => void;
 }
 
+/** The Files tab: this checkout's file tree. Each opened file gets its own tab. */
 export function FileWorkbench({
   api,
   workspace,
-  worktree,
   sessionStatus,
-  tabs,
-  onTabsChange,
+  selectedPath,
+  onOpenFile,
 }: FileWorkbenchProps) {
   const [files, setFiles] = useState<readonly string[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,25 +75,23 @@ export function FileWorkbench({
   }, [refresh]);
 
   return (
-    <section
-      className="side-panel file-workbench file-workbench--split"
-      data-testid="file-workbench"
-    >
-      <FileEditorPane
-        api={api}
-        tabs={tabs}
-        worktree={worktree}
-        workspace={workspace}
-        onActivate={(path) => onTabsChange((current) => activateFile(current, path))}
-        onClose={(path) => onTabsChange((current) => closeFile(current, path))}
-      />
+    <section className="side-panel file-workbench" data-testid="file-workbench">
       <FileExplorer
+        viewStateKey={workspace.id}
         error={listError}
         files={files}
         loading={loading}
-        selectedPath={tabs.active}
+        selectedPath={selectedPath}
         onRefresh={() => refresh({ force: true })}
-        onSelect={(path) => onTabsChange((current) => openFile(current, path))}
+        onSelect={(path) => {
+          onOpenFile(path);
+          // The tree leaves with the Files tab; keep keyboard focus on the opened file's tab.
+          window.requestAnimationFrame(() =>
+            document
+              .querySelector<HTMLElement>('#task-workbench [role="tab"][aria-selected="true"]')
+              ?.focus(),
+          );
+        }}
       />
     </section>
   );

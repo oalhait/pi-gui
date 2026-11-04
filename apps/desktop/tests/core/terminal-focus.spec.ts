@@ -5,7 +5,6 @@ import {
   launchDesktop,
   makeUserDataDir,
   makeWorkspace,
-  selectSidePanel,
 } from "../helpers/electron-app";
 
 test("a terminal that finishes opening keeps focus in the composer when the user moved there", async () => {
@@ -39,8 +38,14 @@ test("a terminal that finishes opening keeps focus in the composer when the user
         await gate;
         return result;
       });
-    }, desktopIpc.terminalEnsurePanel);
-    await selectSidePanel(window, "Terminal");
+    }, desktopIpc.terminalCreateSession);
+    if (!(await window.getByTestId("workbench").isVisible()))
+      await window.getByTestId("toggle-side-panel").click();
+    await window.getByTestId("workbench-add-tab").click();
+    await window
+      .getByTestId("workbench-new-tab-menu")
+      .getByRole("menuitem", { name: "New terminal" })
+      .click();
     await expect
       .poll(() =>
         harness.electronApp.evaluate(
@@ -58,6 +63,9 @@ test("a terminal that finishes opening keeps focus in the composer when the user
       ).terminalResponseGate?.release(),
     );
     await expect(window.locator(".terminal-panel .xterm-helper-textarea")).toHaveCount(1);
+    await expect(
+      window.locator('[role="tab"][aria-selected="true"][data-testid^="workbench-tab-terminal:"]'),
+    ).toHaveCount(1);
     await expect(composer).toBeFocused();
     await expect(composer).toHaveValue("Keep typing here");
   } finally {

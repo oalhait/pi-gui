@@ -35,6 +35,7 @@ const mainFrameChannels = [
   "persistComposerDraft",
   "pendingComposerDraftFlushed",
   "runExtensionAction",
+  "openWorkspaceImage",
 ];
 
 function ipcViolations(filePath, source) {

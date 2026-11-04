@@ -1,120 +1,6 @@
-import type { TaskWorkbenchTemplate } from "../../../contracts/workbench";
+import type { FileLineMark } from "../../../contracts/workbench";
 
-export type FileWorkbenchTabs = TaskWorkbenchTemplate["files"]["tabs"];
-export type FileLineMark = NonNullable<FileWorkbenchTabs["line"]>;
-
-export const EMPTY_FILE_TABS: FileWorkbenchTabs = {
-  tabs: [],
-  active: null,
-  line: null,
-  lineNonce: 0,
-  retained: [],
-};
-
-export function openFile(state: FileWorkbenchTabs, path: string): FileWorkbenchTabs {
-  if (state.tabs.includes(path)) {
-    if (state.active === path && state.line === null) {
-      return state;
-    }
-    return {
-      tabs: state.tabs,
-      active: path,
-      line: null,
-      lineNonce: state.lineNonce,
-      retained: state.retained,
-    };
-  }
-  return {
-    tabs: [...state.tabs, path],
-    active: path,
-    line: null,
-    lineNonce: state.lineNonce,
-    retained: state.retained,
-  };
-}
-
-export function openFileAtLine(
-  state: FileWorkbenchTabs,
-  path: string,
-  line: number,
-  endLine = line,
-): FileWorkbenchTabs {
-  const tabs = state.tabs.includes(path) ? state.tabs : [...state.tabs, path];
-  const retained = state.retained.includes(path) ? state.retained : [...state.retained, path];
-  return {
-    tabs,
-    active: path,
-    line: { start: line, end: endLine },
-    lineNonce: state.lineNonce + 1,
-    retained,
-  };
-}
-
-export function closeFile(state: FileWorkbenchTabs, path: string): FileWorkbenchTabs {
-  const index = state.tabs.indexOf(path);
-  if (index < 0) {
-    return state;
-  }
-  const tabs = state.tabs.filter((tab) => tab !== path);
-  const retained = state.retained.filter((item) => item !== path && tabs.includes(item));
-  if (tabs.length === 0) {
-    return EMPTY_FILE_TABS;
-  }
-  if (state.active !== path) {
-    return {
-      tabs,
-      active: state.active,
-      line: state.line,
-      lineNonce: state.lineNonce,
-      retained,
-    };
-  }
-  return {
-    tabs,
-    active: tabs[Math.min(index, tabs.length - 1)] ?? null,
-    line: null,
-    lineNonce: state.lineNonce,
-    retained,
-  };
-}
-
-export function activateFile(state: FileWorkbenchTabs, path: string): FileWorkbenchTabs {
-  if (!state.tabs.includes(path)) {
-    return state;
-  }
-  if (state.active === path && state.line === null) {
-    return state;
-  }
-  return {
-    tabs: state.tabs,
-    active: path,
-    line: null,
-    lineNonce: state.lineNonce,
-    retained: state.retained,
-  };
-}
-
-export function pruneFiles(
-  state: FileWorkbenchTabs,
-  availablePaths: readonly string[],
-): FileWorkbenchTabs {
-  const allowed = new Set(availablePaths);
-  const retained = state.retained.filter((path) => state.tabs.includes(path) && !allowed.has(path));
-  const keep = new Set<string>([...allowed, ...retained]);
-  const tabs = state.tabs.filter((tab) => keep.has(tab));
-  if (tabs.length === 0) {
-    return EMPTY_FILE_TABS;
-  }
-  const active =
-    state.active && tabs.includes(state.active) ? state.active : (tabs[tabs.length - 1] ?? null);
-  return {
-    tabs,
-    active,
-    line: active === state.active ? state.line : null,
-    lineNonce: state.lineNonce,
-    retained: retained.filter((path) => tabs.includes(path)),
-  };
-}
+export type { FileLineMark };
 
 export function isMarkdownPath(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path);
@@ -141,4 +27,47 @@ export function ancestorDirectoryPaths(filePath: string): readonly string[] {
     directories.push(current);
   }
   return directories;
+}
+
+/**
+ * Tab labels for open files: the basename, plus enough of the parent folder to tell apart files
+ * that share a basename.
+ */
+export function fileTabLabels(paths: readonly string[]): ReadonlyMap<string, string> {
+  const counts = new Map<string, number>();
+  for (const path of paths) {
+    const name = fileNameFromPath(path);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return new Map(
+    paths.map((path) => {
+      const name = fileNameFromPath(path);
+      if ((counts.get(name) ?? 0) < 2) return [path, name];
+      const parent = breadcrumbSegments(path).slice(0, -1).at(-1);
+      return [path, parent ? `${name} · ${parent}` : name];
+    }),
+  );
+}
+
+/** A file size for display, such as "512 B", "14.2 KB" or "3.1 MB". */
+export function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+/** The neighbouring path `step` places along, or undefined at either end of the list. */
+export function siblingPath(
+  siblings: readonly string[],
+  path: string,
+  step: -1 | 1,
+): string | undefined {
+  const index = siblings.indexOf(path);
+  return index < 0 ? undefined : siblings[index + step];
 }

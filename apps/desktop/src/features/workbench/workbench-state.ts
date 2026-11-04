@@ -5,7 +5,7 @@ import {
   type TaskWorkbenchTemplate,
   type ToolRef,
 } from "../../../contracts/workbench";
-import { EMPTY_FILE_TABS, openFile, openFileAtLine } from "./file-workbench-state";
+import type { TerminalPanelSnapshot } from "../../../contracts/ipc";
 
 export interface WorkspaceFileReference {
   readonly workspaceId: string;
@@ -18,11 +18,11 @@ export type WorkbenchAction =
   | { readonly type: "open-tool"; readonly tool: ToolRef }
   | { readonly type: "activate-tool"; readonly toolId: string }
   | { readonly type: "close-tool"; readonly toolId: string }
-  | { readonly type: "show-chooser" }
   | { readonly type: "set-visibility"; readonly visibility: "visible" | "hidden" }
-  | { readonly type: "set-files"; readonly files: TaskWorkbenchTemplate["files"] }
   | { readonly type: "set-changes"; readonly changes: TaskWorkbenchTemplate["changes"] }
-  | { readonly type: "open-file"; readonly file: WorkspaceFileReference };
+  | { readonly type: "open-file"; readonly file: WorkspaceFileReference }
+  /** Shows another file in an open file's tab, in place, such as flipping to the next image. */
+  | { readonly type: "replace-file"; readonly from: string; readonly to: string };
 
 /** A task without a saved layout keeps the side workspace closed until the user opens it. */
 export function initialWorkbenchView(workspaceId: string): TaskWorkbenchTemplate {
@@ -30,7 +30,7 @@ export function initialWorkbenchView(workspaceId: string): TaskWorkbenchTemplate
     visibility: "hidden",
     tools: [{ kind: "changes" }],
     selection: { kind: "tool", toolId: "changes" },
-    files: { workspaceId, tabs: EMPTY_FILE_TABS },
+    files: { workspaceId, line: null, lineNonce: 0 },
     changes: { workspaceId, selectedPath: null, scope: { kind: "uncommitted" } },
   };
 }
@@ -40,6 +40,11 @@ export function activeWorkbenchTool(view: TaskWorkbenchTemplate): ToolRef | unde
   return selection.kind === "tool"
     ? view.tools.find((tool) => toolRefId(tool) === selection.toolId)
     : undefined;
+}
+
+/** Paths of the open file tabs, in tab-row order. */
+export function openFilePaths(view: TaskWorkbenchTemplate): readonly string[] {
+  return view.tools.flatMap((tool) => (tool.kind === "file" ? [tool.path] : []));
 }
 
 /** Rebase explicit actions onto the saved layout before the first write. */
@@ -52,23 +57,29 @@ export function restoreWorkbenchView(
 }
 
 function actionLimitError(view: TaskWorkbenchTemplate, action: WorkbenchAction): string {
-  if (
-    (action.type === "set-files" && action.files.tabs.tabs.length > MAX_WORKBENCH_FILE_TABS) ||
-    (action.type === "open-file" &&
-      view.files.workspaceId === action.file.workspaceId &&
-      view.files.tabs.tabs.length >= MAX_WORKBENCH_FILE_TABS &&
-      !view.files.tabs.tabs.includes(action.file.path))
-  ) {
-    return `You have ${MAX_WORKBENCH_FILE_TABS} file tabs open. Close a file tab before opening another.`;
+  const tool: ToolRef | undefined =
+    action.type === "open-tool"
+      ? action.tool
+      : action.type === "open-file"
+        ? { kind: "file", path: action.file.path }
+        : undefined;
+  if (!tool) return "";
+  // Opening a file from another checkout replaces this checkout's file tabs.
+  const tools =
+    action.type === "open-file" && action.file.workspaceId !== view.files.workspaceId
+      ? view.tools.filter((entry) => entry.kind !== "file")
+      : view.tools;
+  const id = toolRefId(tool);
+  if (tools.some((entry) => toolRefId(entry) === id)) return "";
+  const files = tools.filter((entry) => entry.kind === "file").length;
+  if (tool.kind === "file") {
+    return files >= MAX_WORKBENCH_FILE_TABS
+      ? `You have ${MAX_WORKBENCH_FILE_TABS} file tabs open. Close a file tab before opening another.`
+      : "";
   }
-  if (
-    action.type === "open-tool" &&
-    view.tools.length >= MAX_WORKBENCH_TOOLS &&
-    !view.tools.some((tool) => toolRefId(tool) === toolRefId(action.tool))
-  ) {
-    return "Close a tool tab before opening another.";
-  }
-  return "";
+  return tools.length - files >= MAX_WORKBENCH_TOOLS
+    ? "Close a tool tab before opening another."
+    : "";
 }
 
 export function applyWorkbenchActions(
@@ -117,46 +128,95 @@ export function reduceWorkbench(
     case "close-tool": {
       const index = view.tools.findIndex((tool) => toolRefId(tool) === action.toolId);
       if (index < 0) return view;
+      const closed = view.tools[index];
       const tools = view.tools.filter((tool) => toolRefId(tool) !== action.toolId);
+      const files =
+        closed?.kind === "file" && view.files.line?.path === closed.path
+          ? { ...view.files, line: null }
+          : view.files;
       if (tools.length === 0) {
-        return { ...view, tools, selection: { kind: "chooser" } };
+        return { ...view, tools, files, selection: { kind: "chooser" } };
       }
       if (view.selection.kind !== "tool" || view.selection.toolId !== action.toolId) {
-        return { ...view, tools };
+        return { ...view, tools, files };
       }
       const neighbor = tools[Math.min(index, tools.length - 1)];
       return {
         ...view,
         tools,
+        files,
         selection: neighbor ? { kind: "tool", toolId: toolRefId(neighbor) } : { kind: "chooser" },
       };
     }
-    case "show-chooser":
-      return view.visibility === "visible" && view.selection.kind === "chooser"
-        ? view
-        : { ...view, visibility: "visible", selection: { kind: "chooser" } };
     case "set-visibility":
       return view.visibility === action.visibility
         ? view
         : { ...view, visibility: action.visibility };
-    case "set-files":
-      return action.files === view.files ? view : { ...view, files: action.files };
     case "set-changes":
       return action.changes === view.changes ? view : { ...view, changes: action.changes };
+    case "replace-file": {
+      const fromId = toolRefId({ kind: "file", path: action.from });
+      const toId = toolRefId({ kind: "file", path: action.to });
+      // A file that already has a tab is focused there rather than shown twice.
+      if (view.tools.some((tool) => toolRefId(tool) === toId))
+        return reduceWorkbench(view, { type: "activate-tool", toolId: toId });
+      if (!view.tools.some((tool) => toolRefId(tool) === fromId)) return view;
+      return {
+        ...view,
+        visibility: "visible",
+        tools: view.tools.map((tool): ToolRef =>
+          toolRefId(tool) === fromId ? { kind: "file", path: action.to } : tool,
+        ),
+        selection:
+          view.selection.kind === "tool" && view.selection.toolId !== fromId
+            ? view.selection
+            : { kind: "tool", toolId: toId },
+        files: view.files.line?.path === action.from ? { ...view.files, line: null } : view.files,
+      };
+    }
     case "open-file": {
       const { file } = action;
-      const current =
-        view.files.workspaceId === file.workspaceId ? view.files.tabs : EMPTY_FILE_TABS;
-      const tabs =
-        file.line === undefined
-          ? openFile(current, file.path)
-          : openFileAtLine(current, file.path, file.line, file.endLine);
+      const sameCheckout = view.files.workspaceId === file.workspaceId;
+      const tools = sameCheckout ? view.tools : view.tools.filter((tool) => tool.kind !== "file");
+      const previousLine = sameCheckout ? view.files.line : null;
+      const files: TaskWorkbenchTemplate["files"] =
+        file.line !== undefined
+          ? {
+              workspaceId: file.workspaceId,
+              line: { path: file.path, start: file.line, end: file.endLine ?? file.line },
+              lineNonce: view.files.lineNonce + 1,
+            }
+          : sameCheckout && previousLine?.path !== file.path
+            ? view.files
+            : { workspaceId: file.workspaceId, line: null, lineNonce: view.files.lineNonce };
       return reduceWorkbench(
-        { ...view, files: { workspaceId: file.workspaceId, tabs } },
-        { type: "open-tool", tool: { kind: "files" } },
+        { ...view, tools, files },
+        { type: "open-tool", tool: { kind: "file", path: file.path } },
       );
     }
   }
+}
+
+/** Replaces a saved terminal slot with one tab per live terminal of this chat. */
+export function projectTerminalWorkbench(
+  view: TaskWorkbenchTemplate,
+  terminals: Pick<TerminalPanelSnapshot, "activeSessionId" | "sessions"> | undefined,
+): TaskWorkbenchTemplate {
+  if (!terminals?.sessions.length) return view;
+  return {
+    ...view,
+    tools: view.tools.flatMap((tool): ToolRef[] =>
+      tool.kind === "terminal"
+        ? terminals.sessions.map((session) => ({ kind: "terminal", sessionId: session.id }))
+        : [tool],
+    ),
+    selection:
+      view.selection.kind === "tool" &&
+      view.selection.toolId === "terminal" &&
+      terminals.activeSessionId
+        ? { kind: "tool", toolId: `terminal:${terminals.activeSessionId}` }
+        : view.selection,
+  };
 }
 
 export function projectBrowserWorkbench(

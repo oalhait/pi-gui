@@ -1,6 +1,6 @@
 import type { BrowserAction, BrowserLayout, BrowserMount } from "../../contracts/browser";
 import { desktopIpc } from "../../contracts/ipc";
-import { BrowserOwner } from "../platform/browser-owner";
+import { browserOwnerFor } from "../platform/browser-owner";
 import type { WindowOwner } from "../windows/window-owner";
 import type { MainFrameHandler } from "./main-frame-ipc";
 import { expectSessionTarget } from "./request-validation";
@@ -71,8 +71,7 @@ function action(value: unknown): BrowserAction {
   };
 }
 export function registerBrowserRequests(handle: MainFrameHandler, windows: WindowOwner): void {
-  let owner: BrowserOwner | undefined;
-  const browser = () => (owner ??= new BrowserOwner(windows));
+  const browser = () => browserOwnerFor(windows);
   handle(desktopIpc.browserAttach, mount, (input, request) =>
     browser().attach(request.window, input),
   );

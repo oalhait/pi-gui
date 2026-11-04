@@ -9,7 +9,30 @@ import {
 import { ancestorDirectoryPaths } from "./file-workbench-state";
 import { buildFileTree, filterWorkspaceFiles, type FileTreeNode } from "./file-tree";
 
+interface ExplorerViewState {
+  readonly filter: string;
+  readonly expanded: ReadonlySet<string>;
+}
+
+/**
+ * The explorer is its own tab and unmounts while a file tab is shown. Keep each checkout's
+ * filter and open folders for this window so returning to Files finds the tree as it was left.
+ */
+const explorerViewStates = new Map<string, ExplorerViewState>();
+const MAX_EXPLORER_VIEW_STATES = 32;
+
+function rememberViewState(key: string, state: ExplorerViewState): void {
+  explorerViewStates.delete(key);
+  explorerViewStates.set(key, state);
+  if (explorerViewStates.size > MAX_EXPLORER_VIEW_STATES) {
+    const oldest = explorerViewStates.keys().next().value;
+    if (oldest !== undefined) explorerViewStates.delete(oldest);
+  }
+}
+
 interface FileExplorerProps {
+  /** Identifies the checkout whose filter and open folders are remembered. */
+  readonly viewStateKey?: string;
   readonly files: readonly string[] | null;
   readonly loading: boolean;
   readonly error: string | null;
@@ -19,6 +42,7 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({
+  viewStateKey,
   files,
   loading,
   error,
@@ -26,8 +50,15 @@ export function FileExplorer({
   onSelect,
   onRefresh,
 }: FileExplorerProps) {
-  const [filter, setFilter] = useState("");
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [filter, setFilter] = useState(
+    () => (viewStateKey && explorerViewStates.get(viewStateKey)?.filter) || "",
+  );
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => (viewStateKey && explorerViewStates.get(viewStateKey)?.expanded) || new Set(),
+  );
+  useEffect(() => {
+    if (viewStateKey) rememberViewState(viewStateKey, { filter, expanded });
+  }, [expanded, filter, viewStateKey]);
   const filterActive = filter.trim().length > 0;
   const visibleFiles = useMemo(
     () => (files ? filterWorkspaceFiles(files, filter) : []),
