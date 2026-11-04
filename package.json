@@ -11,6 +11,7 @@
     "marketing:capture": "pnpm --filter @pi-gui/desktop run demo:showcase-captures",
     "marketing:render": "pnpm --filter @pi-app/video run render",
     "typecheck": "pnpm check:workspaces && pnpm build:shared && pnpm -r --if-present typecheck && pnpm typecheck:extension-examples",
+    "app:restart": "node apps/desktop/scripts/restart-installed-app.mjs",
     "package:win": "pnpm --filter @pi-gui/desktop run package:win",
     "package:win:dir": "pnpm --filter @pi-gui/desktop run package:win:dir",
     "lint": "pnpm build:shared && eslint . --max-warnings 0",

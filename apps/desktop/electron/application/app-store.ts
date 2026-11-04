@@ -652,6 +652,31 @@ export class DesktopAppStore {
     return structuredClone(this.state);
   }
 
+  /** Threads with a run going, as a restart that quits now would cut them off. */
+  runningSessionRefs(): SessionRef[] {
+    return this.state.workspaces.flatMap((workspace) =>
+      workspace.sessions
+        .filter((session) => session.status === "running" && !session.archivedAt)
+        .map((session) => ({ workspaceId: workspace.id, sessionId: session.id })),
+    );
+  }
+
+  /** Asks each thread a restart cut off to continue, one at a time. */
+  async resumeInterruptedSessions(sessionRefs: readonly SessionRef[], text: string): Promise<void> {
+    await this.initialize();
+    for (const sessionRef of sessionRefs) {
+      if (!this.sessionFromState(sessionRef)) continue;
+      try {
+        await this.conversationOwner.deliverBackgroundInstruction(sessionRef, text);
+      } catch (error) {
+        console.error(
+          `[app-store] could not continue ${sessionKey(sessionRef)} after the restart`,
+          error,
+        );
+      }
+    }
+  }
+
   applyView(view: DesktopAppViewState): DesktopAppState {
     this.state = this.projectStateForView(view);
     return structuredClone(this.state);
