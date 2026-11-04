@@ -298,7 +298,8 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  /* Shows beside the native page where it stays clear of the resize handle. */
+  background: var(--main);
 }
 .browser-panel__empty {
   display: grid;
