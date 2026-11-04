@@ -300,9 +300,24 @@ async function quitApp(pids) {
     step(`Asking pi-gui to quit failed (${error.message}); sending SIGTERM instead`);
     for (const pid of pids) process.kill(pid, "SIGTERM");
   }
+  // An accepted quit request can still stall (the app replied but never finished quitting).
+  // SIGTERM runs the same normal quit path, so drafts are saved and threads still recorded.
+  try {
+    await waitFor(async () => !pids.some(isAlive), 30_000, "pi-gui to quit");
+    return;
+  } catch {
+    step("pi-gui has not quit after 30 seconds; sending SIGTERM");
+    for (const pid of pids.filter(isAlive)) process.kill(pid, "SIGTERM");
+  }
+  try {
+    await waitFor(async () => !pids.some(isAlive), 30_000, "pi-gui to quit");
+    return;
+  } catch {
+    step("pi-gui is still running; quit it yourself (Cmd+Q) and the install continues");
+  }
   await waitFor(
     async () => !pids.some(isAlive),
-    60_000,
+    5 * 60_000,
     "pi-gui to quit (it was left running; nothing was installed)",
   );
 }
