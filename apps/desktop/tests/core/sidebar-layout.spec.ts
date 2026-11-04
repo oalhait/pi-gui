@@ -69,6 +69,8 @@ test("the sidebar can be dragged wider, remembers its width and resets on double
     await expect(window.locator("aside.sidebar")).toHaveCount(0);
     await window.getByTestId("sidebar-toggle").click();
     await expect.poll(() => sidebarWidth(window)).toBe(defaultWidth + 100);
+    // The sidebar slides in at its full width; wait for it to settle before aiming at the handle.
+    await expect(window.locator(".sidebar-presence")).toHaveAttribute("data-state", "open");
 
     // Dragging far past the limit stops at the maximum instead of swallowing the window.
     const widened = (await handle.boundingBox())!;

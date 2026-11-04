@@ -7,7 +7,8 @@ export interface PaneWidthBounds {
 
 /**
  * Drag and keyboard handle on one vertical edge of a pane. The handle must be a
- * direct child of the pane; `bounds` receives the pane and the pane's parent.
+ * direct child of the pane; `bounds` receives the pane and its parent box, skipping any
+ * `display: contents` wrapper such as the sidebar's presence wrapper.
  * `edge` is the pane edge the handle sits on, so dragging away from the pane widens it.
  */
 export function PaneResizeHandle({
@@ -36,7 +37,10 @@ export function PaneResizeHandle({
 
   useEffect(() => {
     const pane = ref.current?.parentElement;
-    const container = pane?.parentElement;
+    let container = pane?.parentElement;
+    while (container && getComputedStyle(container).display === "contents") {
+      container = container.parentElement;
+    }
     if (!pane || !container) return;
     const measure = () => {
       const { min, max } = boundsRef.current(pane, container);

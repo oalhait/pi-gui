@@ -61,7 +61,7 @@ import {
   touchThreadSwitcherOrder,
 } from "../features/threads/thread-switcher-order";
 import { useThreadSwitcher } from "../features/threads/hooks/use-thread-switcher";
-import { SidebarToggleButton } from "../features/threads/sidebar-toggle-button";
+import { SidebarPresence, SidebarToggleButton } from "../features/threads/sidebar-toggle-button";
 import { OpenInEditorButton } from "../features/threads/open-in-editor-button";
 import { useOpenInEditor } from "../features/threads/hooks/use-open-in-editor";
 import { Topbar } from "./topbar";
@@ -987,7 +987,7 @@ export default function App() {
           ref={sidebarDrawer.toggleRef}
         />
       ) : null}
-      {!snapshot.sidebarCollapsed ? (
+      <SidebarPresence collapsed={snapshot.sidebarCollapsed}>
         <Sidebar
           activeView={snapshot.activeView}
           selectedWorkspace={selectedWorkspace}
@@ -1017,7 +1017,7 @@ export default function App() {
           onSetSessionPinned={threadMenu.setPinned}
           onUnarchiveSession={threadMenu.restore}
         />
-      ) : null}
+      </SidebarPresence>
 
       <main className={mainClassName} style={workbenchWidth.style}>
         <Topbar

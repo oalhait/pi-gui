@@ -1,8 +1,13 @@
 .shell {
   --sidebar-width: 236px;
-  --titlebar-toggle-left: 86px;
-  --titlebar-toggle-size: 30px;
+  /* macOS traffic lights sit at `trafficLightPosition` { x: 18, y: 18 }: three 14px buttons
+     9px apart, so the zoom button ends at x 78 and their centre line is y 25. */
+  --titlebar-control-center-y: 25px;
+  --titlebar-toggle-left: 90px;
+  --titlebar-toggle-size: 28px;
   --titlebar-toggle-main-gap: 16px;
+  --sidebar-slide-in: var(--motion-slow);
+  --sidebar-slide-out: calc(var(--motion-slow) * 0.75);
   --titlebar-collapsed-main-padding-left: calc(
     var(--titlebar-toggle-left) + var(--titlebar-toggle-size) + var(--titlebar-toggle-main-gap)
   );
@@ -23,6 +28,39 @@
 
 .shell--sidebar-collapsed {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Native full screen hides the traffic lights, so the toggle takes their place. */
+.shell:has(> .sidebar-toggle--no-traffic-lights) {
+  --titlebar-toggle-left: 12px;
+}
+
+/* Collapsing and expanding slide the docked sidebar: a negative margin pulls it left while its
+   `auto` grid track shrinks by the same amount, so main takes the space as it goes. The wrapper
+   from `SidebarPresence` is `display: contents`; `.sidebar` stays the grid item. */
+.sidebar-presence {
+  display: contents;
+}
+
+.shell--sidebar-collapsed:has(> .sidebar-presence) {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.sidebar-presence > .sidebar {
+  transition:
+    margin-left var(--sidebar-slide-in) var(--ease-out),
+    transform var(--sidebar-slide-in) var(--ease-out);
+}
+
+.sidebar-presence[data-state="closing"] > .sidebar {
+  margin-left: calc(-1 * min(var(--sidebar-width), 45vw));
+  transition-duration: var(--sidebar-slide-out);
+}
+
+@starting-style {
+  .sidebar-presence[data-state="opening"] > .sidebar {
+    margin-left: calc(-1 * min(var(--sidebar-width), 45vw));
+  }
 }
 
 .sidebar,
@@ -148,7 +186,7 @@
 }
 
 .shortcut-tooltip-wrap.thread-grouping:hover .shortcut-tooltip,
-.shortcut-tooltip-wrap.thread-grouping:focus-within .shortcut-tooltip {
+.shortcut-tooltip-wrap.thread-grouping:has(:focus-visible) .shortcut-tooltip {
   opacity: 1;
   transform: none;
 }
@@ -852,7 +890,7 @@
 }
 
 .session-row .session-row__tooltip-wrap:hover .session-row__tooltip,
-.session-row .session-row__tooltip-wrap:focus-within .session-row__tooltip {
+.session-row .session-row__tooltip-wrap:has(:focus-visible) .session-row__tooltip {
   transform: none;
 }
 
@@ -984,11 +1022,12 @@
    A backdrop covers main while it is open; the backdrop, Escape, choosing a thread and the
    always-visible titlebar toggle (z-index 80) all dismiss it. */
 @media (max-width: 760px) {
-  .shell:not(.shell--sidebar-collapsed) {
+  .shell,
+  .shell--sidebar-collapsed:has(> .sidebar-presence) {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .shell:not(.shell--sidebar-collapsed) > .sidebar {
+  .sidebar-presence > .sidebar {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -998,6 +1037,19 @@
     box-shadow: var(--shadow-xl);
   }
 
+  /* The drawer overlays main, so it slides by transform alone; the shadow leaves with it. */
+  .sidebar-presence[data-state="closing"] > .sidebar {
+    margin-left: 0;
+    transform: translateX(calc(-100% - 32px));
+  }
+
+  @starting-style {
+    .sidebar-presence[data-state="opening"] > .sidebar {
+      margin-left: 0;
+      transform: translateX(calc(-100% - 32px));
+    }
+  }
+
   /* Above main's persistent layers and below the drawer (40); dialog backdrops sit above both. */
   .sidebar-drawer-backdrop {
     -webkit-app-region: no-drag;
@@ -1005,6 +1057,13 @@
     inset: 0;
     z-index: 35;
     background: var(--scrim);
+    transition: opacity var(--sidebar-slide-in) var(--ease-out);
+  }
+
+  @starting-style {
+    .sidebar-drawer-backdrop {
+      opacity: 0;
+    }
   }
 }
 
@@ -1040,4 +1099,12 @@
 /* Transparency mode re-enables the sidebar backdrop blur in dark. */
 .enable-transparency.dark .sidebar {
   backdrop-filter: var(--glass-blur) var(--glass-saturation);
+}
+
+/* Reduced motion: the sidebar snaps between states and `SidebarPresence` skips the slide. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-presence > .sidebar,
+  .sidebar-drawer-backdrop {
+    transition: none;
+  }
 }
