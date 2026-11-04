@@ -18,6 +18,7 @@ import type {
 import { hasFilesInDataTransfer } from "./composer-attachments";
 import { ExtensionDock, type ExtensionDockModel } from "../extensions/extension-session-ui";
 import {
+  ChatIcon,
   ExtensionIcon,
   FileIcon,
   ModelIcon,
@@ -411,12 +412,23 @@ function MentionMenuSections({
   const extensionOptions = options.filter(
     (option): option is ExtensionMentionOption => option.kind === "extension",
   );
+  const threadOptions = options.filter((option) => option.kind === "thread");
   const fileOptions = options.filter(
     (option): option is FileMentionOption => option.kind === "file",
   );
 
   return (
     <>
+      {threadOptions.length > 0 ? (
+        <MentionMenuSection
+          title="Threads"
+          options={threadOptions}
+          selectedIndex={selectedIndex}
+          allOptions={options}
+          onSelect={onSelect}
+          onEnableExtension={onEnableExtension}
+        />
+      ) : null}
       {extensionOptions.length > 0 ? (
         <MentionMenuSection
           title="Extensions"
@@ -527,6 +539,25 @@ function MentionMenuItem({
           </button>
         )}
       </div>
+    );
+  }
+
+  if (option.kind === "thread") {
+    return (
+      <button
+        className={`mention-menu__item ${active ? "mention-menu__item--active" : ""}`}
+        data-testid="mention-menu-thread"
+        type="button"
+        onClick={() => onSelect(option)}
+      >
+        <span className="mention-menu__icon" aria-hidden="true">
+          <ChatIcon />
+        </span>
+        <span className="mention-menu__line">
+          <span className="mention-menu__thread-title">{option.title}</span>
+          {option.detail ? <span className="mention-menu__badge">{option.detail}</span> : null}
+        </span>
+      </button>
     );
   }
 

@@ -3,8 +3,10 @@ import { FileIcon } from "../../ui/icons";
 import { ImageAttachmentThumb } from "./image-attachment-thumb";
 import { parseAnnotatedPrompt } from "./annotations/annotation-prompt";
 import { parseCrossProjectMessage } from "../../../contracts/thread-message";
+import { stripThreadReferences } from "../../../contracts/thread-references";
 
-function queuedPreview(text: string): string {
+function queuedPreview(message: string): string {
+  const text = stripThreadReferences(message);
   const crossProject = parseCrossProjectMessage(text);
   if (crossProject) return `From project ${crossProject.project} · ${crossProject.body.trim()}`;
   const annotated = parseAnnotatedPrompt(text);

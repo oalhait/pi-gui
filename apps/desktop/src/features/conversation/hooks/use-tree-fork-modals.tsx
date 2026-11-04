@@ -19,6 +19,7 @@ import {
 import { applySnapshotIfNewer } from "../../../app/desktop-app-state";
 import type { PiDesktopApi } from "../../../../contracts/ipc";
 import { resolveRepoWorkspaceId } from "../../../../contracts/workspace-roots";
+import { stripThreadReferences } from "../../../../contracts/thread-references";
 
 interface TreeModalState {
   readonly open: boolean;
@@ -96,7 +97,8 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
         .then(async ({ state, result }) => {
           applySnapshotIfNewer(setSnapshot, state);
           if (result.cancelled || result.aborted) return;
-          setComposerDraft(result.editorText ?? "");
+          // Sending again adds the mentioned threads' ids back.
+          setComposerDraft(stripThreadReferences(result.editorText ?? ""));
           if (message.attachments?.length) {
             const attachments = message.attachments.map((attachment) => ({
               ...attachment,

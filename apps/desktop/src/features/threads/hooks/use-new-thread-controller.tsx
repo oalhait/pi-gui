@@ -35,6 +35,7 @@ import type { SettingsSection } from "../../settings/settings-view";
 import { useMentionMenu } from "../../conversation/hooks/use-mention-menu";
 import { useSlashMenu } from "../../conversation/hooks/use-slash-menu";
 import { resolveRepoWorkspaceId } from "../../../../contracts/workspace-roots";
+import { withThreadReferences } from "../../../../contracts/thread-references";
 
 interface UseNewThreadControllerParams {
   readonly api: PiDesktopApi | undefined;
@@ -260,26 +261,18 @@ export function useNewThreadController(params: UseNewThreadControllerParams) {
     },
   });
 
-  const enableMentionExtension = useCallback(
-    (filePath: string) => {
-      if (!api || !workspace) {
-        return Promise.resolve();
-      }
-      return updateSnapshot(setSnapshot, () =>
-        api.setExtensionEnabled(workspace.id, filePath, true),
-      ).then(() => undefined);
-    },
-    [api, setSnapshot, workspace],
-  );
-
   const mentionMenu = useMentionMenu({
+    // No session yet, so no children. A new worktree shares the project with the root's
+    // threads without sharing their workspace, which its tools cannot resolve.
+    snapshot,
+    otherProjectThreadsOnly: environment === "worktree",
     composerDraft: prompt,
     setComposerDraft: setPrompt,
     composerRef,
     workspaceId: workspace?.id,
     runtime,
     api,
-    onEnableExtension: enableMentionExtension,
+    setSnapshot,
   });
 
   const startThread = useCallback(() => {
@@ -307,7 +300,9 @@ export function useNewThreadController(params: UseNewThreadControllerParams) {
     const input: StartThreadInput = {
       rootWorkspaceId,
       environment,
-      prompt,
+      prompt: prompt.trimStart().startsWith("/")
+        ? prompt
+        : withThreadReferences(prompt, mentionMenu.threadTargets),
       attachments,
       provider: resolvedProvider,
       modelId: resolvedModelId,
@@ -341,6 +336,7 @@ export function useNewThreadController(params: UseNewThreadControllerParams) {
     attachments,
     environment,
     extensionFlags,
+    mentionMenu.threadTargets,
     modelOnboarding.requiresModelSelection,
     prompt,
     resolvedModelId,

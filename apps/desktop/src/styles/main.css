@@ -1760,12 +1760,20 @@
   font-weight: 600;
 }
 
+.mention-menu__thread-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mention-menu__description {
   color: var(--muted-soft);
   font-size: 12px;
 }
 
 .mention-menu__badge {
+  flex: 0 0 auto;
   color: var(--muted);
   font-size: 10px;
   font-weight: 650;

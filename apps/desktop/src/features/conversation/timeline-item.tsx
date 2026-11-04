@@ -22,6 +22,7 @@ import {
   type OpenAnnotation,
 } from "./annotations/annotation-markers";
 import { parseAnnotatedPrompt } from "./annotations/annotation-prompt";
+import { stripThreadReferences } from "../../../contracts/thread-references";
 import { SentAnnotations } from "./annotations/sent-annotations";
 import { ExtensionCardItem, type RunExtensionAction } from "./extension-card";
 import { ImageAttachmentThumb } from "./image-attachment-thumb";
@@ -173,7 +174,9 @@ function TimelineMessage({
     ) : null;
 
   if (item.role === "user") {
-    const body = annotated ? annotated.body : (crossProject?.body ?? item.text);
+    const body = stripThreadReferences(
+      annotated ? annotated.body : (crossProject?.body ?? item.text),
+    );
     return (
       <article className="timeline-item timeline-item--user" ref={articleRef}>
         <div className="timeline-item__user-stack">

@@ -4,13 +4,21 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type KeyboardEvent,
   type RefObject,
+  type SetStateAction,
 } from "react";
 import type { RuntimeExtensionRecord, RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
 import { extensionSourceSummary } from "../../extensions/extension-display";
 import type { PiDesktopApi } from "../../../../contracts/ipc";
+import type { DesktopAppState } from "../../../../contracts/desktop-state";
+import {
+  threadMentionTargets,
+  type ThreadMentionTarget,
+} from "../../../../contracts/thread-references";
 import { nextMenuIndex } from "./use-slash-menu";
+import { updateSnapshot } from "../../../app/desktop-app-state";
 
 export type MentionOption =
   | {
@@ -22,6 +30,14 @@ export type MentionOption =
       readonly enabled: boolean;
       readonly enabling: boolean;
       readonly path: string;
+    }
+  | {
+      readonly kind: "thread";
+      readonly id: string;
+      readonly insertText: string;
+      readonly title: string;
+      /** Relationship, project and busy state worth seeing before picking, e.g. "Child · Running". */
+      readonly detail: string;
     }
   | {
       readonly kind: "file";
@@ -37,7 +53,13 @@ interface UseMentionMenuParams {
   readonly workspaceId: string | undefined;
   readonly runtime?: RuntimeSnapshot;
   readonly api: PiDesktopApi | undefined;
-  readonly onEnableExtension?: (filePath: string) => Promise<void>;
+  /** Source of the threads to offer; the composer sends from `workspaceId` and `sessionId`. */
+  readonly snapshot?: DesktopAppState | null;
+  readonly sessionId?: string;
+  /** For a thread that will start in a new worktree, which reaches only other projects. */
+  readonly otherProjectThreadsOnly?: boolean;
+  /** Receives the state after enabling an extension from the menu. */
+  readonly setSnapshot?: Dispatch<SetStateAction<DesktopAppState | null>>;
 }
 
 export interface MentionMenuState {
@@ -47,6 +69,8 @@ export interface MentionMenuState {
   readonly handleMentionKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   readonly insertMention: (option: MentionOption) => void;
   readonly enableMentionExtension: (option: Extract<MentionOption, { kind: "extension" }>) => void;
+  /** Threads an `@title` can refer to; pass them to withThreadReferences when sending. */
+  readonly threadTargets: readonly ThreadMentionTarget[];
 }
 
 // Match @<query> at end of string (or preceded by whitespace)
@@ -68,8 +92,31 @@ export function useMentionMenu({
   workspaceId,
   runtime,
   api,
-  onEnableExtension,
+  snapshot,
+  sessionId,
+  otherProjectThreadsOnly = false,
+  setSnapshot,
 }: UseMentionMenuParams): MentionMenuState {
+  const onEnableExtension = useMemo(
+    () =>
+      api && workspaceId && setSnapshot
+        ? (filePath: string) =>
+            updateSnapshot(setSnapshot, () =>
+              api.setExtensionEnabled(workspaceId, filePath, true),
+            ).then(() => undefined)
+        : undefined,
+    [api, setSnapshot, workspaceId],
+  );
+  const workspaces = snapshot?.workspaces;
+  const childThreadLinks = snapshot?.childThreadLinks;
+  const threadTargets = useMemo(() => {
+    if (!workspaces || !workspaceId) return [];
+    const targets = threadMentionTargets(workspaces, childThreadLinks ?? [], {
+      workspaceId,
+      sessionId,
+    });
+    return otherProjectThreadsOnly ? targets.filter((target) => target.otherProject) : targets;
+  }, [childThreadLinks, otherProjectThreadsOnly, sessionId, workspaceId, workspaces]);
   const [allFiles, setAllFiles] = useState<readonly string[]>([]);
   const [pendingEnablePaths, setPendingEnablePaths] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -135,6 +182,7 @@ export function useMentionMenu({
       lowerQuery,
       pendingEnablePaths,
     );
+    const threadOptions = buildThreadMentionOptions(threadTargets, lowerQuery);
     const fileOptions = allFiles
       .filter((file) => file.toLowerCase().includes(lowerQuery))
       .slice(0, 10)
@@ -144,8 +192,8 @@ export function useMentionMenu({
         insertText: filePath,
         filePath,
       }));
-    return [...extensionOptions, ...fileOptions];
-  }, [allFiles, mentionMatch, pendingEnablePaths, runtime?.extensions]);
+    return [...threadOptions, ...extensionOptions, ...fileOptions];
+  }, [allFiles, mentionMatch, pendingEnablePaths, runtime?.extensions, threadTargets]);
 
   const showMentionMenu = mentionOptions.length > 0;
 
@@ -271,6 +319,7 @@ export function useMentionMenu({
     handleMentionKeyDown,
     insertMention,
     enableMentionExtension,
+    threadTargets,
   };
 }
 
@@ -308,6 +357,40 @@ function buildExtensionMentionOptions(
       enabling,
       path: extension.path,
     }));
+}
+
+function buildThreadMentionOptions(
+  threads: readonly ThreadMentionTarget[],
+  lowerQuery: string,
+): MentionOption[] {
+  const words = lowerQuery.split(/[-_]+/).filter(Boolean);
+  return threads
+    .filter((thread) => {
+      const haystack = `${thread.title} ${thread.project}`.toLowerCase();
+      return words.every((word) => haystack.includes(word));
+    })
+    .slice(0, 6)
+    .map((thread) => ({
+      kind: "thread",
+      id: `thread:${thread.workspaceId}:${thread.sessionId}`,
+      insertText: thread.mention,
+      title: thread.title,
+      detail: threadMentionDetail(thread),
+    }));
+}
+
+function threadMentionDetail(thread: ThreadMentionTarget): string {
+  return [
+    thread.relationship === "child" ? "Child" : undefined,
+    thread.relationship === "parent" ? "Parent" : undefined,
+    thread.otherProject ? thread.project : undefined,
+    // Settled threads need no label; busy or failed ones change what a message will do.
+    thread.status === "idle" || thread.status === "complete"
+      ? undefined
+      : thread.status[0]!.toUpperCase() + thread.status.slice(1),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function describeExtension(extension: RuntimeExtensionRecord): string {
