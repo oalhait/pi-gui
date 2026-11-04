@@ -25,6 +25,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -190,12 +191,14 @@ async function runWorker(logFile) {
     }
     await verifySignature(appPath, identity);
 
+    removeStaleSingletonLock();
     step("Launching the new build");
     if (!(await launchAndSettle())) {
       step("The new build did not stay running; putting the previous build back");
       if (existsSync(backupApp)) {
         await rm(appPath, { recursive: true, force: true });
         await rename(backupApp, appPath);
+        removeStaleSingletonLock();
         await launchAndSettle();
       }
       throw new Error("The new build quit right after launch; the previous build is back.");
@@ -355,6 +358,27 @@ async function waitFor(check, timeoutMs, what) {
 
 function step(message) {
   console.log(`\n[${new Date().toLocaleTimeString()}] ${message}`);
+}
+
+/**
+ * Chromium's single-instance lock is a `SingletonLock -> <host>-<pid>` symlink in userData.
+ * A lock left with a different host name reads as held by another computer, and the new
+ * build then exits at once (macOS changes the host name with the network, e.g. mac and
+ * mac.lan). Once the old app has quit, a lock whose process is gone is stale; remove it.
+ */
+function removeStaleSingletonLock() {
+  let target;
+  try {
+    target = readlinkSync(path.join(userDataDir, "SingletonLock"));
+  } catch {
+    return;
+  }
+  const pid = Number(/-(\d+)$/.exec(target)?.[1]);
+  if (Number.isInteger(pid) && pid > 0 && isAlive(pid)) return;
+  step(`Removing the stale single-instance lock (${target})`);
+  for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+    rmSync(path.join(userDataDir, name), { force: true });
+  }
 }
 
 function isAlive(pid) {
