@@ -33,6 +33,8 @@ export default defineConfig(({ command }) => {
         rollupOptions: {
           input: {
             preload: path.resolve(projectRoot, "electron/preload.ts"),
+            // Web pages in the side pane browser; shares no modules with the app preload.
+            browser: path.resolve(projectRoot, "electron/browser-preload.ts"),
           },
         },
       },

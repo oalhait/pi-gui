@@ -8,6 +8,8 @@ export interface BrowserTabState {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly error?: string;
+  /** The page asked for a passkey, which this browser can't provide; offer other ways in. */
+  readonly passkeyHint?: boolean;
 }
 export interface BrowserPanelState {
   readonly revision: number;
@@ -33,7 +35,16 @@ export interface BrowserLayout {
 export interface BrowserAction {
   readonly mountId: string;
   readonly kind:
-    "navigate" | "back" | "forward" | "reload" | "stop" | "new-tab" | "select-tab" | "close-tab";
+    | "navigate"
+    | "back"
+    | "forward"
+    | "reload"
+    | "stop"
+    | "new-tab"
+    | "select-tab"
+    | "close-tab"
+    | "open-external"
+    | "dismiss-passkey-hint";
   readonly tabId?: string;
   readonly url?: string;
 }

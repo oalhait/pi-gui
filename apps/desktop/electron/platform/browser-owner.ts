@@ -12,6 +12,12 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { writeFile, rename } from "node:fs/promises";
 import path from "node:path";
+import { shell } from "electron";
+import {
+  BROWSER_PASSKEY_CHANNEL,
+  isBrowserPasskeyEvent,
+  type BrowserPasskeyEvent,
+} from "./browser-passkey-watch";
 import {
   browserUrl,
   browserShortcut,
@@ -53,6 +59,10 @@ interface Tab {
   readonly view: WebContentsView;
   url: string;
   error?: string;
+  /** The tab whose page opened this one with `window.open`, such as a sign-in popup. */
+  openerId?: string;
+  passkeyHint?: boolean;
+  passkeyTimer?: ReturnType<typeof setTimeout>;
 }
 interface Root {
   revision: number;
@@ -138,6 +148,14 @@ export class BrowserOwner {
       callback(false),
     );
     this.browserSession.setPermissionCheckHandler(() => false);
+    // WebAuthn doesn't consult these handlers. Electron shows no WebAuthn UI and, unsigned by
+    // Apple, can't reach iCloud Keychain passkeys, so this preload tells the panel when a page
+    // asks for one. It exposes nothing to the page.
+    this.browserSession.registerPreloadScript({
+      type: "frame",
+      id: "pi-browser-passkeys",
+      filePath: path.join(__dirname, "..", "preload", "browser.js"),
+    });
     app.once("will-quit", (event) => {
       event.preventDefault();
       this.writeQueue
@@ -235,6 +253,17 @@ export class BrowserOwner {
           break;
         case "select-tab":
           root.activeTabId = tab.id;
+          break;
+        case "open-external": {
+          // A sign-in popup can't finish in another browser without its opener, so open the
+          // page that started it there instead. Cookies don't carry over either way.
+          const source = root.tabs.find((entry) => entry.id === tab.openerId) ?? tab;
+          if (source.url !== "about:blank" && isBrowserNavigationAllowed(source.url))
+            shell.openExternal(source.url).catch(console.error);
+          break;
+        }
+        case "dismiss-passkey-hint":
+          this.clearPasskeyHint(tab);
           break;
         case "close-tab": {
           const index = root.tabs.indexOf(tab);
@@ -384,6 +413,7 @@ export class BrowserOwner {
     contents.on("did-navigate", () => {
       tab.url = contents.getURL();
       tab.error = undefined;
+      this.clearPasskeyHint(tab);
       this.save(host, root);
       publish();
     });
@@ -416,13 +446,21 @@ export class BrowserOwner {
       publish();
     });
     contents.on("will-prevent-unload", (event) => event.preventDefault());
+    contents.ipc.on(BROWSER_PASSKEY_CHANNEL, (_event, value: unknown) => {
+      if (isBrowserPasskeyEvent(value)) this.passkeyEvent(host, root, tab, value);
+    });
     contents.once("destroyed", () => {
+      this.clearPasskeyHint(tab);
       if (host.window.isDestroyed() || !root.tabs.includes(tab)) return;
       const index = root.tabs.indexOf(tab);
       root.tabs.splice(index, 1);
       host.window.contentView.removeChildView(view);
+      if (host.visibleTab === tab) host.visibleTab = undefined;
+      // A page closing itself is usually a finished sign-in popup: return to the page that
+      // opened it, as a browser window would.
+      const opener = root.tabs.find((entry) => entry.id === tab.openerId);
       if (root.activeTabId === tab.id)
-        root.activeTabId = root.tabs[Math.min(index, root.tabs.length - 1)]?.id ?? "";
+        root.activeTabId = opener?.id ?? root.tabs[Math.min(index, root.tabs.length - 1)]?.id ?? "";
 
       this.present(host);
       this.save(host, root);
@@ -449,6 +487,7 @@ export class BrowserOwner {
           const guest = (options as { readonly webContents?: WebContents }).webContents;
           if (!guest) throw new Error("Electron did not supply popup contents.");
           const popup = this.createTab(host, root, destination, guest);
+          popup.openerId = tab.id;
           root.activeTabId = popup.id;
           this.present(host);
           this.save(host, root);
@@ -538,6 +577,7 @@ export class BrowserOwner {
           canGoBack: contents.navigationHistory.canGoBack(),
           canGoForward: contents.navigationHistory.canGoForward(),
           error: tab.error,
+          ...(tab.passkeyHint ? { passkeyHint: true } : {}),
         };
       }),
     };
@@ -559,10 +599,39 @@ export class BrowserOwner {
     });
   }
 
+  /**
+   * A passkey request still waiting after a moment will not finish here (Electron 43 never
+   * times it out), and a failed one needs another way in; either way, say so.
+   */
+  private passkeyEvent(host: Host, root: Root, tab: Tab, event: BrowserPasskeyEvent): void {
+    if (tab.passkeyTimer) clearTimeout(tab.passkeyTimer);
+    tab.passkeyTimer = undefined;
+    if (event === "waiting") {
+      tab.passkeyTimer = setTimeout(() => {
+        tab.passkeyTimer = undefined;
+        if (!root.tabs.includes(tab)) return;
+        tab.passkeyHint = true;
+        this.publish(host, root);
+      }, 1_500);
+      return;
+    }
+    if (Boolean(tab.passkeyHint) === (event === "failed")) return;
+    tab.passkeyHint = event === "failed";
+    this.publish(host, root);
+  }
+
+  private clearPasskeyHint(tab: Tab): void {
+    if (tab.passkeyTimer) clearTimeout(tab.passkeyTimer);
+    tab.passkeyTimer = undefined;
+    tab.passkeyHint = undefined;
+  }
+
   private hide(host: Host): void {
-    if (host.visibleTab && !host.visibleTab.view.webContents.isDestroyed()) {
-      const focused = host.visibleTab.view.webContents.isFocused();
-      host.visibleTab.view.setVisible(false);
+    // A page that closed itself has no contents left to hide.
+    const visible = host.visibleTab?.view.webContents as WebContents | undefined;
+    if (visible && !visible.isDestroyed()) {
+      const focused = visible.isFocused();
+      host.visibleTab?.view.setVisible(false);
       if (focused && !host.window.isDestroyed()) host.window.webContents.focus();
     }
     host.visibleTab = undefined;

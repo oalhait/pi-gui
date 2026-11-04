@@ -228,6 +228,33 @@ export function BrowserPanel({
           {error || tab?.error}
         </div>
       ) : null}
+      {tab?.passkeyHint ? (
+        <div className="browser-panel__notice" role="status" aria-label="Passkey sign-in">
+          <p>
+            Passkeys aren&rsquo;t available in pi-gui&rsquo;s browser. Use another sign-in option,
+            like an email code, a password or a security key. On Google, choose &ldquo;Try another
+            way&rdquo;. You can also sign in from your default browser, but that sign-in won&rsquo;t
+            carry over here.
+          </p>
+          <div className="browser-panel__notice-actions">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => act({ kind: "open-external" })}
+            >
+              Open in default browser
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Dismiss passkey hint"
+              onClick={() => act({ kind: "dismiss-passkey-hint" })}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="browser-panel__viewport" ref={viewport} data-browser-tab-id={tab?.id}>
         {!state ? (
           <p role="status">Opening browser…</p>
