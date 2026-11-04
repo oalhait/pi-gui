@@ -69,6 +69,11 @@ export class SessionStateMap {
   readonly lastRunOutcomeBySession = new Map<string, SessionRunOutcome>();
   readonly extensionUiBySession = new Map<string, MutableSessionExtensionUiState>();
   readonly pendingAutoTitleBySession = new Map<string, PendingAutoTitle>();
+  /**
+   * Threads the user named this app run (sidebar, menu or /name). The agent's rename_thread
+   * never replaces their title. Kept in memory: the tool only works during a chat's first exchange.
+   */
+  readonly userTitledSessions = new Set<string>();
   readonly loadedTranscriptKeys = new Set<string>();
 
   /**
@@ -123,6 +128,9 @@ export class SessionStateMap {
       }
     }
     for (const key of this.loadedTranscriptKeys) {
+      keys.add(key);
+    }
+    for (const key of this.userTitledSessions) {
       keys.add(key);
     }
     for (const key of this.pinnedSessionOrder) {
@@ -182,6 +190,7 @@ export class SessionStateMap {
     this.extensionUiBySession.delete(key);
     this.pendingAutoTitleBySession.delete(key);
     pendingAutoTitle?.cancel();
+    this.userTitledSessions.delete(key);
     this.loadedTranscriptKeys.delete(key);
     this.transcriptCache.delete(key);
   }

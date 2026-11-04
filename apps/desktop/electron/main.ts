@@ -56,6 +56,7 @@ import {
   createScheduledTaskRuntimeTools,
   type ScheduledTaskRuntimeBridge,
 } from "./scheduled-tasks/scheduled-task-runtime";
+import { createThreadTitleRuntimeExtension } from "./workspace/thread-title-runtime";
 import { getChangedFiles, getFileDiff, stageFile } from "./platform/files/app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./platform/files/app-store-files";
 import { WorkspaceImageServer } from "./platform/files/workspace-images";
@@ -1080,6 +1081,15 @@ app
           displayName: "Thread orchestration",
           description: "Lets pi start, read and message other pi-gui threads",
           factory: createOrchestrationRuntimeExtension(orchestrationRuntimeBridge),
+        },
+        {
+          name: "pi-gui-thread-title",
+          displayName: "Chat title",
+          description: "Lets pi name a new chat during its first reply",
+          factory: createThreadTitleRuntimeExtension(async (ctx, title) => {
+            await store.initialize();
+            return store.renameSessionFromAgent(sessionRefFromExtensionContext(ctx), title);
+          }),
         },
         {
           name: "pi-gui-scheduled-tasks",

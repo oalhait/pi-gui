@@ -78,6 +78,9 @@ export interface WorkspaceOwnerHost {
   ensureSessionReady(sessionRef: SessionRef): Promise<SessionSnapshot | undefined>;
   cancelPendingDialogsForSession(sessionRef: SessionRef): Promise<void>;
   clearPendingAutoTitle(sessionRef: SessionRef): void;
+  /** Record that the user named this thread, so the agent's rename_thread leaves it alone. */
+  markSessionTitledByUser(sessionRef: SessionRef): void;
+  isSessionTitledByUser(sessionRef: SessionRef): boolean;
   updateSessionConfig(sessionRef: SessionRef, config: SessionConfig | undefined): void;
   buildCreateSessionOptions(workspaceId: string): Promise<CreateSessionOptions | undefined>;
   /** Check a new thread's flag choices against the flags this workspace's extensions registered. */
@@ -110,6 +113,11 @@ export interface WorkspaceOwner {
   selectWorkspace(workspaceId: string): Promise<DesktopAppState>;
   selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   renameSession(target: WorkspaceSessionTarget, title: string): Promise<DesktopAppState>;
+  /**
+   * The agent's rename_thread for its own chat. Wins over a pending or applied auto-title, never
+   * over a title the user set; throws when refused. The caller has checked the first exchange.
+   */
+  renameSessionFromAgent(sessionRef: SessionRef, title: string): Promise<string>;
   archiveSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   /**
    * Archives only if the driver confirms nothing is in flight and the last run outcome
@@ -140,6 +148,7 @@ export function createWorkspaceOwner(store: WorkspaceOwnerHost): WorkspaceOwner 
     selectWorkspace: (workspaceId) => selectWorkspace(store, workspaceId),
     selectSession: (target) => selectSession(store, target),
     renameSession: (target, title) => renameSession(store, target, title),
+    renameSessionFromAgent: (sessionRef, title) => renameSessionFromAgent(store, sessionRef, title),
     archiveSession: (target) => archiveSession(store, target),
     archiveIdleSession: (sessionRef, expect) => archiveIdleSession(store, sessionRef, expect),
     unarchiveSession: (target) => unarchiveSession(store, target),
@@ -303,6 +312,7 @@ async function renameSession(
       return store.withError(`Unknown session: ${target.workspaceId}:${target.sessionId}`);
     }
     store.clearPendingAutoTitle(sessionRef);
+    store.markSessionTitledByUser(sessionRef);
     await store.driver.renameSession(sessionRef, nextTitle);
     const state = store.workspaceState();
     return store.refreshState({
@@ -311,6 +321,28 @@ async function renameSession(
       clearLastError: true,
     });
   });
+}
+
+async function renameSessionFromAgent(
+  store: WorkspaceOwnerHost,
+  sessionRef: SessionRef,
+  title: string,
+): Promise<string> {
+  await store.initialize();
+  const session = store.sessionFromState(sessionRef);
+  if (!session) {
+    throw new Error(`Unknown session: ${sessionRef.workspaceId}:${sessionRef.sessionId}`);
+  }
+  if (store.isSessionTitledByUser(sessionRef)) {
+    throw new Error(`The user named this chat "${session.title}", so its title stays.`);
+  }
+  // Clearing the pending auto-title cancels it, and its late result no longer matches a token.
+  store.clearPendingAutoTitle(sessionRef);
+  if (session.title !== title) {
+    await store.driver.renameSession(sessionRef, title);
+    await store.refreshState();
+  }
+  return title;
 }
 
 async function archiveSession(
@@ -435,11 +467,15 @@ async function createSession(
 
   return store.withErrorHandling(async () => {
     const createOptions = await store.buildCreateSessionOptions(input.workspaceId);
+    const title = input.title?.trim();
     const snapshot = await store.driver.createSession(ws, {
       ...createOptions,
-      title: input.title?.trim() || NEW_THREAD_PLACEHOLDER_TITLE,
+      title: title || NEW_THREAD_PLACEHOLDER_TITLE,
     });
     store.seedSession(snapshot);
+    if (title) {
+      store.markSessionTitledByUser(snapshot.ref);
+    }
     store.setActiveSession(snapshot.ref);
     return store.refreshState({
       selectedWorkspaceId: snapshot.ref.workspaceId,

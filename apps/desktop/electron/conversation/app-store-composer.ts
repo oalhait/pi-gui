@@ -129,6 +129,7 @@ interface ConversationOwnerHost {
   reloadTranscriptFromDriver(sessionRef: SessionRef): Promise<void>;
   publishSelectedTranscriptFor(sessionRef: SessionRef): void;
   clearPendingAutoTitle(sessionRef: SessionRef): void;
+  markSessionTitledByUser(sessionRef: SessionRef): void;
 }
 
 type ComposerStore = ConversationOwnerHost;
@@ -969,6 +970,7 @@ async function runComposerCommand(
 
   if (parsed.type === "name") {
     store.clearPendingAutoTitle(sessionRef);
+    store.markSessionTitledByUser(sessionRef);
     await store.driver.renameSession(sessionRef, parsed.title);
     return finishComposerCommand(store, sessionRef, key, `Session renamed to ${parsed.title}`, {
       sessionTitle: parsed.title,

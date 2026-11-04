@@ -424,6 +424,7 @@ export class DesktopAppStore {
       reloadTranscriptFromDriver: (sessionRef) => this.reloadTranscriptFromDriver(sessionRef),
       publishSelectedTranscriptFor: (sessionRef) => this.publishSelectedTranscriptFor(sessionRef),
       clearPendingAutoTitle: (sessionRef) => this.clearPendingAutoTitle(sessionRef),
+      markSessionTitledByUser: (sessionRef) => this.markSessionTitledByUser(sessionRef),
     });
 
     this.workspaceOwner = createWorkspaceOwner({
@@ -476,6 +477,9 @@ export class DesktopAppStore {
       cancelPendingDialogsForSession: (sessionRef) =>
         this.cancelPendingDialogsForSession(sessionRef),
       clearPendingAutoTitle: (sessionRef) => this.clearPendingAutoTitle(sessionRef),
+      markSessionTitledByUser: (sessionRef) => this.markSessionTitledByUser(sessionRef),
+      isSessionTitledByUser: (sessionRef) =>
+        this.sessionState.userTitledSessions.has(sessionKey(sessionRef)),
       updateSessionConfig: (sessionRef, config) => this.updateSessionConfig(sessionRef, config),
       buildCreateSessionOptions: (workspaceId) => this.buildCreateSessionOptions(workspaceId),
       resolveExtensionFlags: (workspaceId, requested) =>
@@ -1329,6 +1333,11 @@ export class DesktopAppStore {
   ) {
     await this.initialize();
     return this.orchestrationOwner.createChildThreadToolResult(parentRef, input);
+  }
+
+  /** rename_thread: the agent names its own chat during the first exchange. */
+  renameSessionFromAgent(sessionRef: SessionRef, title: string): Promise<string> {
+    return this.workspaceOwner.renameSessionFromAgent(sessionRef, title);
   }
 
   listThreadsToolResult(parentRef: SessionRef, workspace?: string) {
@@ -4929,6 +4938,10 @@ export class DesktopAppStore {
     sessionRef: SessionRef,
   ): import("../conversation/session-state-map").PendingAutoTitle | undefined {
     return this.sessionState.pendingAutoTitleBySession.get(sessionKey(sessionRef));
+  }
+
+  markSessionTitledByUser(sessionRef: SessionRef): void {
+    this.sessionState.userTitledSessions.add(sessionKey(sessionRef));
   }
 
   clearPendingAutoTitle(sessionRef: SessionRef): void {

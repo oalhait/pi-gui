@@ -24,6 +24,7 @@ import {
   readThreadToolName,
   sendMessageToThreadToolName,
 } from "../orchestration/orchestration-runtime";
+import { renameThreadToolName } from "../workspace/thread-title-runtime";
 
 export interface RunMetrics {
   readonly startedAt: string;
@@ -274,7 +275,9 @@ export function applyTimelineEvent(
       const extensionLabel = state.extensionToolLabels(event.sessionRef).get(event.toolName);
       // Extension and thread tools count as tools: their names say nothing about files or searches.
       const nameHeuristics =
-        extensionLabel === undefined && !orchestrationToolNames.has(event.toolName);
+        extensionLabel === undefined &&
+        !orchestrationToolNames.has(event.toolName) &&
+        event.toolName !== renameThreadToolName;
       if (nameHeuristics && looksLikeSearch(event.toolName, event.input)) {
         metrics.searchCount += 1;
       }
@@ -487,6 +490,10 @@ function toolLabel(toolName: string, input: unknown): string {
   }
   if (toolName === archiveChildThreadsToolName) {
     return "Archived child threads";
+  }
+  if (toolName === renameThreadToolName) {
+    const title = isRecord(input) ? stringProperty(input, "title") : undefined;
+    return title ? `Renamed chat to "${truncate(title, 80)}"` : "Renamed chat";
   }
   if (looksLikeSearch(toolName, input)) {
     return detail ? `Searched ${detail}` : `Searched with ${toolName}`;
