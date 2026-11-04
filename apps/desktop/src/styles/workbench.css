@@ -249,6 +249,33 @@
   padding: 6px;
   border-bottom: 1px solid var(--line);
 }
+.browser-panel__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.browser-panel__notice p {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+.browser-panel__notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.browser-panel__notice .icon-button {
+  width: 24px;
+  height: 24px;
+}
 .browser-panel__toolbar input {
   min-width: 0;
   flex: 1;

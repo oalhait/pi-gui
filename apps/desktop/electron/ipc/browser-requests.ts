@@ -55,6 +55,8 @@ function action(value: unknown): BrowserAction {
       "new-tab",
       "select-tab",
       "close-tab",
+      "open-external",
+      "dismiss-passkey-hint",
     ].includes(text(input.kind))
   )
     throw new Error("Invalid browser action.");
