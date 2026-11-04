@@ -8,6 +8,7 @@ import {
   type WorkbenchAgentState,
   type WorkbenchCaptureTarget,
 } from "../../../contracts/workbench-agent";
+import { imageTypeForPath } from "../../../contracts/workspace-images";
 import { workbenchToolLabel } from "./workbench";
 import type { useTerminalWorkbench } from "./use-terminal-workbench";
 
@@ -25,8 +26,17 @@ function describeTool(tool: Exclude<ToolRef, { kind: "browser" }>, workbench: Wo
   switch (tool.kind) {
     case "files":
       return "File explorer";
-    case "file":
-      return `Open file: ${tool.path}`;
+    case "file": {
+      if (!imageTypeForPath(tool.path)) return `Open file: ${tool.path}`;
+      // Only the selected tab is mounted; its viewer knows the image's pixel size once loaded.
+      const viewer = [...document.querySelectorAll<HTMLElement>('[data-testid="file-image"]')].find(
+        (element) => element.dataset.path === tool.path,
+      );
+      const { width, height, zoom } = viewer?.dataset ?? {};
+      return width && height
+        ? `Image: ${tool.path}, ${width}×${height} px, shown ${zoom === "actual" ? "at 100%" : "fitted to the pane"}`
+        : `Image: ${tool.path}`;
+    }
     case "changes": {
       const selected = view.changes.selectedPath;
       return `Review scope: ${view.changes.scope.kind}${selected ? `; selected file: ${selected}` : ""}`;

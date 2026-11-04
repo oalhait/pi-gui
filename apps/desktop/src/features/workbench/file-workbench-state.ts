@@ -48,3 +48,26 @@ export function fileTabLabels(paths: readonly string[]): ReadonlyMap<string, str
     }),
   );
 }
+
+/** A file size for display, such as "512 B", "14.2 KB" or "3.1 MB". */
+export function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+/** The neighbouring path `step` places along, or undefined at either end of the list. */
+export function siblingPath(
+  siblings: readonly string[],
+  path: string,
+  step: -1 | 1,
+): string | undefined {
+  const index = siblings.indexOf(path);
+  return index < 0 ? undefined : siblings[index + step];
+}

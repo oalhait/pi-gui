@@ -20,7 +20,9 @@ export type WorkbenchAction =
   | { readonly type: "close-tool"; readonly toolId: string }
   | { readonly type: "set-visibility"; readonly visibility: "visible" | "hidden" }
   | { readonly type: "set-changes"; readonly changes: TaskWorkbenchTemplate["changes"] }
-  | { readonly type: "open-file"; readonly file: WorkspaceFileReference };
+  | { readonly type: "open-file"; readonly file: WorkspaceFileReference }
+  /** Shows another file in an open file's tab, in place, such as flipping to the next image. */
+  | { readonly type: "replace-file"; readonly from: string; readonly to: string };
 
 /** A task without a saved layout keeps the side workspace closed until the user opens it. */
 export function initialWorkbenchView(workspaceId: string): TaskWorkbenchTemplate {
@@ -152,6 +154,26 @@ export function reduceWorkbench(
         : { ...view, visibility: action.visibility };
     case "set-changes":
       return action.changes === view.changes ? view : { ...view, changes: action.changes };
+    case "replace-file": {
+      const fromId = toolRefId({ kind: "file", path: action.from });
+      const toId = toolRefId({ kind: "file", path: action.to });
+      // A file that already has a tab is focused there rather than shown twice.
+      if (view.tools.some((tool) => toolRefId(tool) === toId))
+        return reduceWorkbench(view, { type: "activate-tool", toolId: toId });
+      if (!view.tools.some((tool) => toolRefId(tool) === fromId)) return view;
+      return {
+        ...view,
+        visibility: "visible",
+        tools: view.tools.map((tool): ToolRef =>
+          toolRefId(tool) === fromId ? { kind: "file", path: action.to } : tool,
+        ),
+        selection:
+          view.selection.kind === "tool" && view.selection.toolId !== fromId
+            ? view.selection
+            : { kind: "tool", toolId: toId },
+        files: view.files.line?.path === action.from ? { ...view.files, line: null } : view.files,
+      };
+    }
     case "open-file": {
       const { file } = action;
       const sameCheckout = view.files.workspaceId === file.workspaceId;

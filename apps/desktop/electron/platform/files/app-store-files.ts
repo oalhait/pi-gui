@@ -63,11 +63,12 @@ export async function readWorkspaceFile(
     const buffer = Buffer.alloc(readLength);
     const { bytesRead } = await handle.read(buffer, 0, readLength, 0);
     const previewBytes = buffer.subarray(0, Math.min(bytesRead, MAX_PREVIEW_BYTES));
-    const binary = previewBytes.includes(0);
+    const text = previewBytes.includes(0) ? undefined : decodeText(previewBytes);
+    const binary = text === undefined;
 
     return {
       path: filePath,
-      content: binary ? "" : new TextDecoder("utf-8", { fatal: false }).decode(previewBytes),
+      content: text ?? "",
       truncated: bytesRead > MAX_PREVIEW_BYTES || stats.size > MAX_PREVIEW_BYTES,
       binary,
       sizeBytes: stats.size,
@@ -75,6 +76,17 @@ export async function readWorkspaceFile(
   } finally {
     await handle.close();
   }
+}
+
+/**
+ * UTF-8 text, or undefined when the bytes look binary: more than 1 in 20 characters do not decode
+ * (a lone character cut off at the preview limit is allowed).
+ */
+export function decodeText(bytes: Uint8Array): string | undefined {
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  let invalid = 0;
+  for (const char of text) if (char === "\uFFFD") invalid += 1;
+  return invalid > 1 && invalid * 20 > text.length ? undefined : text;
 }
 
 function rememberListedFiles(workspacePath: string, files: string[]): void {

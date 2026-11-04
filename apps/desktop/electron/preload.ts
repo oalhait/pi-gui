@@ -43,6 +43,7 @@ import {
 } from "../contracts/ipc";
 import type { ExtensionActionEffect, ExtensionActionRequest } from "../contracts/extension-actions";
 import type { ClipboardImageRead } from "../contracts/composer-attachments";
+import type { WorkspaceImageResult } from "../contracts/workspace-images";
 import type { DesktopEditorList } from "../contracts/editors";
 import type { SaveTaskWorkbenchTemplateInput, TaskWorkbenchTemplate } from "../contracts/workbench";
 import type {
@@ -643,6 +644,11 @@ contextBridge.exposeInMainWorld("piApp", {
       workspaceId,
       filePath,
     ) as Promise<WorkspaceFilePreview>,
+  openWorkspaceImage: (workspaceId: string, filePath: string) =>
+    ipcRenderer.invoke(desktopIpc.openWorkspaceImage, {
+      workspaceId,
+      filePath,
+    }) as Promise<WorkspaceImageResult>,
   revealWorkspaceFile: (workspaceId: string, filePath: string) =>
     ipcRenderer.invoke(desktopIpc.revealWorkspaceFile, workspaceId, filePath) as Promise<void>,
   getChangedFiles: (workspaceId: string) =>

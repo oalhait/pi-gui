@@ -216,6 +216,11 @@ export interface DesktopIpcCapabilities {
     options?: { readonly force?: boolean },
   ) => Promise<readonly unknown[]>;
   readonly readWorkspaceFile: (workspacePath: string, filePath: string) => Promise<unknown>;
+  readonly openWorkspaceImage: (
+    window: BrowserWindow,
+    workspacePath: string,
+    filePath: string,
+  ) => Promise<unknown>;
   readonly revealWorkspaceFile: (workspacePath: string, filePath: string) => Promise<void>;
   readonly getChangedFiles: (workspacePath: string) => Promise<ChangedFilesResult>;
   readonly getFileDiff: (workspacePath: string, filePath: string) => Promise<string>;
@@ -997,6 +1002,21 @@ export function registerDesktopIpc({
   });
 
   registerWorkspaceFileIpc(windows, owners.workspace, capabilities);
+  handleMainFrame(
+    desktopIpc.openWorkspaceImage,
+    (raw) => {
+      const input = expectRecord(raw, "image");
+      return {
+        workspaceId: expectNonEmptyString(input.workspaceId, "workspaceId"),
+        filePath: expectNonEmptyString(input.filePath, "filePath"),
+      };
+    },
+    ({ workspaceId, filePath }, request) => {
+      const workspacePath = owners.workspace.getWorkspacePath(workspaceId);
+      if (!workspacePath) throw new Error(`Unknown workspace: ${workspaceId}`);
+      return capabilities.openWorkspaceImage(request.window, workspacePath, filePath);
+    },
+  );
   ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {
     const window = senderWindow(windows, event);
     if (window.isMaximized()) {

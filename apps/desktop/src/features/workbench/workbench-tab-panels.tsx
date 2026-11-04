@@ -37,6 +37,7 @@ export function FileTabPanel({
       path={tool.path}
       worktree={worktree}
       workspace={workspace}
+      onNavigate={(next) => workbench.replaceFileTab(tool.path, next)}
     />
   );
 }

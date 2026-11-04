@@ -58,6 +58,8 @@ import {
 } from "./scheduled-tasks/scheduled-task-runtime";
 import { getChangedFiles, getFileDiff, stageFile } from "./platform/files/app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./platform/files/app-store-files";
+import { WorkspaceImageServer } from "./platform/files/workspace-images";
+import { WORKSPACE_IMAGE_HOST } from "../contracts/workspace-images";
 import { resolveExistingWorkspacePath } from "./platform/files/workspace-paths";
 import { MAIN_DEV_RELOAD_MARKER } from "./dev-reload-main-probe";
 import { NotificationManager } from "./platform/notification-manager";
@@ -103,6 +105,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: TOOL_IMAGE_SCHEME, privileges: { standard: true, secure: true } },
 ]);
 
+/** Image files a window's Files tabs show, served on the tool-image scheme's workspace host. */
+const workspaceImages = new WorkspaceImageServer();
+const workspaceImageWindows = new WeakSet<BrowserWindow>();
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
 const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
 const windowTestMode = appTestMode ?? "foreground";
@@ -1100,7 +1105,11 @@ app
       generateThreadTitleOverride: async (workspace, options) =>
         generateThreadTitleOverride?.(workspace, options),
     });
-    protocol.handle(TOOL_IMAGE_SCHEME, (request) => store.transcriptImageResponse(request.url));
+    protocol.handle(TOOL_IMAGE_SCHEME, (request) =>
+      new URL(request.url).host === WORKSPACE_IMAGE_HOST
+        ? workspaceImages.response(request.url)
+        : store.transcriptImageResponse(request.url),
+    );
     windowOwner = new WindowOwner(store, {
       onActiveWindowChanged: (window) => {
         mainWindow = window;
@@ -1288,6 +1297,14 @@ app
           attachments.flatMap(validateComposerAttachmentPayload),
         listWorkspaceFiles,
         readWorkspaceFile,
+        openWorkspaceImage: (window, workspacePath, filePath) => {
+          if (!workspaceImageWindows.has(window)) {
+            workspaceImageWindows.add(window);
+            const windowId = window.id;
+            window.once("closed", () => workspaceImages.revokeWindow(windowId));
+          }
+          return workspaceImages.open(window.id, workspacePath, filePath);
+        },
         revealWorkspaceFile: async (workspacePath, filePath) => {
           const resolved = await resolveExistingWorkspacePath(workspacePath, filePath);
           shell.showItemInFolder(resolved);

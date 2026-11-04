@@ -214,6 +214,15 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
     [apply, ensureEntry],
   );
 
+  /** Shows another file of this checkout in an open file's tab, such as the next image. */
+  const replaceFileTab = useCallback(
+    (from: string, to: string) => {
+      const ref = current.current.target;
+      if (ref) apply(ref, [{ type: "replace-file", from, to }]);
+    },
+    [apply],
+  );
+
   const setChanges = useCallback(
     (update: SetStateAction<TaskWorkbenchTemplate["changes"]>) => {
       const ref = current.current.target;
@@ -269,6 +278,7 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
     setVisibility,
     toggleVisibility,
     openFileTab,
+    replaceFileTab,
     setChanges,
     openFile,
     retryRestore,

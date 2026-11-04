@@ -275,3 +275,30 @@ test("browser pages project into the tool row without changing the saved placeme
     ),
   ).toBe("browser:one");
 });
+
+test("replacing a file tab shows another file in place and keeps the tab order", () => {
+  let view = initialWorkbenchView("checkout");
+  for (const path of ["a.png", "b.ts", "c.png"])
+    view = reduceWorkbench(view, { type: "open-file", file: { workspaceId: "checkout", path } });
+  view = reduceWorkbench(view, {
+    type: "open-file",
+    file: { workspaceId: "checkout", path: "a.png", line: 2 },
+  });
+  const replaced = reduceWorkbench(view, { type: "replace-file", from: "a.png", to: "z.png" });
+  expect(replaced.tools.map(toolRefId)).toEqual([
+    "changes",
+    "file:z.png",
+    "file:b.ts",
+    "file:c.png",
+  ]);
+  expect(replaced.selection).toEqual({ kind: "tool", toolId: "file:z.png" });
+  expect(replaced.files.line).toBeNull();
+
+  // A file that already has a tab is focused there, not opened twice.
+  const focused = reduceWorkbench(replaced, { type: "replace-file", from: "z.png", to: "c.png" });
+  expect(focused.tools.map(toolRefId)).toEqual(replaced.tools.map(toolRefId));
+  expect(focused.selection).toEqual({ kind: "tool", toolId: "file:c.png" });
+  expect(reduceWorkbench(replaced, { type: "replace-file", from: "gone.png", to: "x.png" })).toBe(
+    replaced,
+  );
+});

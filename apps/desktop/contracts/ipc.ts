@@ -23,6 +23,7 @@ import type {
   SessionTreeSnapshot,
 } from "@pi-gui/session-driver/types";
 import type { ClipboardImageRead } from "./composer-attachments";
+import type { WorkspaceImageResult } from "./workspace-images";
 import type { DesktopEditorList } from "./editors";
 import type { SessionRef } from "@pi-gui/session-driver/types";
 import type { SaveTaskWorkbenchTemplateInput, TaskWorkbenchTemplate } from "./workbench";
@@ -247,6 +248,7 @@ export const desktopIpc = {
   closeWindow: "pi-gui:close-window",
   listWorkspaceFiles: "pi-gui:list-workspace-files",
   readWorkspaceFile: "pi-gui:read-workspace-file",
+  openWorkspaceImage: "pi-gui:open-workspace-image",
   revealWorkspaceFile: "pi-gui:reveal-workspace-file",
   getChangedFiles: "pi-gui:get-changed-files",
   getFileDiff: "pi-gui:get-file-diff",
@@ -962,6 +964,8 @@ export interface PiDesktopApi {
     options?: { readonly force?: boolean },
   ): Promise<string[]>;
   readWorkspaceFile(workspaceId: string, filePath: string): Promise<WorkspaceFilePreview>;
+  /** Checks an image file in the workspace and returns a URL this window can show it with. */
+  openWorkspaceImage(workspaceId: string, filePath: string): Promise<WorkspaceImageResult>;
   revealWorkspaceFile(workspaceId: string, filePath: string): Promise<void>;
   getChangedFiles(workspaceId: string): Promise<ChangedFilesResult>;
   getFileDiff(workspaceId: string, filePath: string): Promise<string>;
