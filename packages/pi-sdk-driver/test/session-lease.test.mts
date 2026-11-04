@@ -66,6 +66,15 @@ await test("same-host lease is dead when its pid is gone, alive when pid runs an
   assert.equal(alive, false);
 });
 
+await test("same machine under a network-derived hostname still uses the pid check", () => {
+  // macOS reports `mac` on one launch and `mac.lan` on the next when no HostName is set.
+  const self = { pid: 4242, hostname: "mac.lan" };
+  const snap = foreignSnapshot({ hostname: "mac" }, 10_000);
+  assert.equal(isLeaseDead(snap, { now: 20_000, ttlMs: TTL, self, isPidAlive: () => false }), true);
+  assert.equal(isLeaseDead(snap, { now: 20_000, ttlMs: TTL, self, isPidAlive: () => true }), false);
+  assert.ok(isSameHolder({ pid: 4242, hostname: "MAC.local" }, self));
+});
+
 await test("cross-host lease falls back to TTL: fresh mtime alive, stale mtime dead", () => {
   const snap = foreignSnapshot({ hostname: "other-host" }, 10_000);
   // isPidAlive must never be consulted for a different host, so make it throw.

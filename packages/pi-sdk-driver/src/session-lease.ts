@@ -85,12 +85,27 @@ export function currentLeaseIdentity(): LeaseIdentity {
   return { pid: process.pid, hostname: hostname(), token: randomUUID() };
 }
 
+/**
+ * Whether two recorded hostnames name the same machine. macOS derives
+ * `os.hostname()` from the network when no HostName is set, so one machine can
+ * report `mac` on one launch and `mac.lan` on the next. Compare the first DNS
+ * label, case-insensitively, so a network change does not make our own dead
+ * leases look like another host's.
+ */
+export function isSameHost(a: string, b: string): boolean {
+  return shortHostname(a) === shortHostname(b);
+}
+
+function shortHostname(name: string): string {
+  return name.trim().toLowerCase().split(".")[0] ?? "";
+}
+
 /** Tokens decide ownership when both sides have one; older leases fall back to pid + host. */
 export function isSameHolder(info: LeaseInfo | LeaseIdentity, self: LeaseIdentity): boolean {
   if (info.token && self.token) {
     return info.token === self.token;
   }
-  return info.pid === self.pid && info.hostname === self.hostname;
+  return info.pid === self.pid && isSameHost(info.hostname, self.hostname);
 }
 
 /** Whether a running process with `pid` exists (best-effort, same-host only). */
@@ -113,7 +128,7 @@ export function defaultIsPidAlive(pid: number): boolean {
  * or the lease has not been refreshed within the TTL.
  */
 export function isLeaseDead(snapshot: LeaseSnapshot, opts: LeaseStalenessOptions): boolean {
-  const sameHost = snapshot.info.hostname === opts.self.hostname;
+  const sameHost = isSameHost(snapshot.info.hostname, opts.self.hostname);
   if (sameHost && !opts.isPidAlive(snapshot.info.pid)) {
     return true;
   }

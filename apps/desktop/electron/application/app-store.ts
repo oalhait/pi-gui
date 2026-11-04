@@ -12,6 +12,7 @@ import {
   isExtensionUiDialogRequest,
   PiSdkDriver,
   type PiSdkDriverConfig,
+  isSameHost,
   SessionLeasedError,
 } from "@pi-gui/pi-sdk-driver";
 import type { SessionCatalogEntry } from "@pi-gui/catalogs";
@@ -4975,8 +4976,9 @@ function describeStoreError(error: unknown): string {
     const where = holder.surface === "pi-cli" ? "the pi CLI" : "another pi instance";
     // A holder on this machine keeps its lease while it runs; one elsewhere
     // may have crashed, and its lease then expires after a few minutes.
-    const next =
-      holder.hostname === hostname() ? "Close it there" : "Close it there or wait a few minutes";
+    const next = isSameHost(holder.hostname, hostname())
+      ? "Close it there"
+      : "Close it there or wait a few minutes";
     return `This session is currently open in ${where} (pid ${holder.pid} on host ${holder.hostname}). ${next} to continue here.`;
   }
   return error instanceof Error ? error.message : String(error);
