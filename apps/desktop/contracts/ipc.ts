@@ -249,6 +249,8 @@ export const desktopIpc = {
   listWorkspaceFiles: "pi-gui:list-workspace-files",
   readWorkspaceFile: "pi-gui:read-workspace-file",
   openWorkspaceImage: "pi-gui:open-workspace-image",
+  watchWorkspaceFiles: "pi-gui:watch-workspace-files",
+  workspaceFileChanged: "pi-gui:workspace-file-changed",
   revealWorkspaceFile: "pi-gui:reveal-workspace-file",
   getChangedFiles: "pi-gui:get-changed-files",
   getFileDiff: "pi-gui:get-file-diff",
@@ -453,6 +455,13 @@ export interface WorkspaceFilePreview {
   readonly truncated: boolean;
   readonly binary: boolean;
   readonly sizeBytes: number;
+}
+
+/** An open file tab's file changed or disappeared on disk. */
+export interface WorkspaceFileChange {
+  readonly workspaceId: string;
+  readonly path: string;
+  readonly kind: "changed" | "deleted";
 }
 
 export interface TerminalSize {
@@ -966,6 +975,9 @@ export interface PiDesktopApi {
   readWorkspaceFile(workspaceId: string, filePath: string): Promise<WorkspaceFilePreview>;
   /** Checks an image file in the workspace and returns a URL this window can show it with. */
   openWorkspaceImage(workspaceId: string, filePath: string): Promise<WorkspaceImageResult>;
+  /** Replaces the files this window watches for open file tabs; an empty list stops watching. */
+  watchWorkspaceFiles(workspaceId: string, paths: readonly string[]): Promise<void>;
+  onWorkspaceFileChanged(listener: (change: WorkspaceFileChange) => void): () => void;
   revealWorkspaceFile(workspaceId: string, filePath: string): Promise<void>;
   getChangedFiles(workspaceId: string): Promise<ChangedFilesResult>;
   getFileDiff(workspaceId: string, filePath: string): Promise<string>;

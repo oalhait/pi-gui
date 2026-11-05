@@ -24,6 +24,8 @@ interface WorkbenchEntry {
   error: string;
   /** The file tab shown most recently; this window only, so the tree can reveal it. */
   lastFile: string | null;
+  /** Bumped when a file is opened, so an already open tab re-reads its file. */
+  fileRefresh: number;
 }
 
 interface UseWorkbenchOptions {
@@ -71,6 +73,7 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
       latestSave: 0,
       error: "",
       lastFile: null,
+      fileRefresh: 0,
     };
     entries.current.set(key, entry);
     return entry;
@@ -208,10 +211,14 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
     (path: string) => {
       const ref = current.current.target;
       if (!ref) return;
-      const workspaceId = ensureEntry(ref).view.files.workspaceId;
-      apply(ref, [{ type: "open-file", file: { workspaceId, path } }]);
+      const entry = ensureEntry(ref);
+      entry.fileRefresh += 1;
+      apply(ref, [
+        { type: "open-file", file: { workspaceId: entry.view.files.workspaceId, path } },
+      ]);
+      publish();
     },
-    [apply, ensureEntry],
+    [apply, ensureEntry, publish],
   );
 
   /** Shows another file of this checkout in an open file's tab, such as the next image. */
@@ -250,9 +257,11 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
       // The link belongs to the task shown when it was opened; a task switch during the read cancels it.
       const latest = current.current.target;
       if (!latest || targetKey(latest) !== targetKey(ref)) return;
+      ensureEntry(ref).fileRefresh += 1;
       apply(ref, [{ type: "open-file", file }]);
+      publish();
     },
-    [apply],
+    [apply, ensureEntry, publish],
   );
 
   const retryRestore = useCallback(() => {
@@ -263,12 +272,23 @@ function useWorkbenchLayout({ api, target }: UseWorkbenchOptions) {
   const entry = target ? entries.current.get(targetKey(target)) : undefined;
   const view = entry?.view ?? initialWorkbenchView(target?.workspaceId ?? "");
   const files = openFilePaths(view);
+  const filesWorkspaceId = view.files.workspaceId;
+  const watchedFiles = files.join("\0");
+  // Main watches only the files open as tabs here, so each tab follows its file on disk.
+  useEffect(() => {
+    if (!api || !filesWorkspaceId) return;
+    api
+      .watchWorkspaceFiles(filesWorkspaceId, watchedFiles ? watchedFiles.split("\0") : [])
+      .catch((error: unknown) => console.error("[renderer] watchWorkspaceFiles failed", error));
+  }, [api, filesWorkspaceId, watchedFiles]);
   return {
     view,
     /** Paths of the open file tabs, in tab order. */
     openFiles: files,
     lastOpenedFile:
       entry?.lastFile && files.includes(entry.lastFile) ? entry.lastFile : (files.at(-1) ?? null),
+    /** Changes each time a file is opened, including one whose tab is already open. */
+    fileRefresh: entry?.fileRefresh ?? 0,
     activeTool: activeWorkbenchTool(view),
     ready: entry?.restore === "ready",
     error: entry?.error ?? "",

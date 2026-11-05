@@ -34,6 +34,7 @@ export function FileTabPanel({
       api={api}
       line={line?.path === tool.path ? line : null}
       lineNonce={lineNonce}
+      refreshNonce={workbench.fileRefresh}
       path={tool.path}
       worktree={worktree}
       workspace={workspace}

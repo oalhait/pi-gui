@@ -24,6 +24,8 @@ interface FileEditorPaneProps {
   /** A highlighted range in this file, if a link opened it at a line. */
   readonly line: FileLineMark | null;
   readonly lineNonce: number;
+  /** Changes when this file was opened again, which re-reads it. */
+  readonly refreshNonce: number;
   /** Shows another file in this tab, such as the next image in the folder. */
   readonly onNavigate: (path: string) => void;
 }
@@ -57,12 +59,20 @@ export function FileEditorPane({
   path: activePath,
   line: lineMark,
   lineNonce,
+  refreshNonce,
   onNavigate,
 }: FileEditorPaneProps) {
   const [preview, setPreview] = useState<WorkspaceFilePreview | null>(null);
   const [image, setImage] = useState<WorkspaceImageResult | null>(null);
   const [viewerError, setViewerError] = useState<string | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
+  const [missing, setMissing] = useState(false);
+  /** Bumped when main reports this file changed on disk. */
+  const [diskRevision, setDiskRevision] = useState(0);
+  /** The view (path and image/text mode) whose content is on screen, refreshed in place. */
+  const shownView = useRef<string | null>(null);
+  /** The open (refreshNonce) the content on screen was read for; the agent waits on it. */
+  const [settledRefresh, setSettledRefresh] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState(() => lineMark !== null);
   const nextSourceKey = `${activePath}:${lineMark ? lineNonce : "none"}`;
   const [sourceKey, setSourceKey] = useState(nextSourceKey);
@@ -80,10 +90,25 @@ export function FileEditorPane({
       ? (worktree?.name ?? workspace.branchName ?? workspace.name)
       : null;
 
+  useEffect(
+    () =>
+      api.onWorkspaceFileChanged((change) => {
+        if (change.workspaceId !== workspace.id || change.path !== activePath) return;
+        if (change.kind === "deleted") setMissing(true);
+        else setDiskRevision((revision) => revision + 1);
+      }),
+    [activePath, api, workspace.id],
+  );
+
   useEffect(() => {
     let cancelled = false;
-    setViewerLoading(true);
-    setViewerError(null);
+    const view = `${workspace.id}:${activePath}:${showImage ? "image" : "text"}`;
+    // A re-read of the content on screen swaps it in place, keeping the scroll position.
+    const refresh = shownView.current === view;
+    if (!refresh) {
+      shownView.current = null;
+      setViewerLoading(true);
+    }
     const request = showImage
       ? api.openWorkspaceImage(workspace.id, activePath).then((result) => {
           if (!cancelled) {
@@ -98,27 +123,49 @@ export function FileEditorPane({
           }
         });
     void request
-      .catch((error: unknown) => {
+      .then(() => {
         if (!cancelled) {
-          setPreview(null);
-          setImage(null);
-          setViewerError(error instanceof Error ? error.message : String(error));
+          shownView.current = view;
+          setMissing(false);
+          setViewerError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        shownView.current = null;
+        setPreview(null);
+        setImage(null);
+        if (/\bENOENT\b/.test(message)) {
+          setMissing(true);
+          setViewerError(null);
+        } else {
+          setMissing(false);
+          setViewerError(message);
         }
       })
       .finally(() => {
         if (!cancelled) {
           setViewerLoading(false);
+          setSettledRefresh(refreshNonce);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [activePath, api, showImage, workspace.id]);
+  }, [activePath, api, diskRevision, refreshNonce, showImage, workspace.id]);
 
   const showSource = (!markdown && !svg) || sourceMode;
 
   return (
-    <section className="side-panel file-editor" data-testid="file-editor" aria-label="Open file">
+    <section
+      aria-label="Open file"
+      className="side-panel file-editor"
+      data-path={activePath}
+      data-refresh={settledRefresh ?? undefined}
+      data-state={viewerLoading ? "loading" : missing ? "missing" : viewerError ? "error" : "ready"}
+      data-testid="file-editor"
+    >
       <div className="file-editor__toolbar">
         {worktreeLabel ? (
           <span className="file-editor__worktree-chip" data-testid="file-editor-worktree-chip">
@@ -159,7 +206,7 @@ export function FileEditorPane({
           <button
             aria-label="Copy file"
             className="icon-button"
-            disabled={!preview || preview.binary || Boolean(viewerError)}
+            disabled={!preview || preview.binary || Boolean(viewerError) || missing}
             type="button"
             onClick={() => {
               if (preview && !preview.binary) {
@@ -190,6 +237,7 @@ export function FileEditorPane({
           image: showImage ? image : null,
           lineMark: showSource ? lineMark : null,
           markdown,
+          missing,
           onNavigate,
           preview,
           showSource,
@@ -206,6 +254,7 @@ function renderEditorBody({
   image,
   lineMark,
   markdown,
+  missing,
   onNavigate,
   preview,
   showSource,
@@ -216,6 +265,7 @@ function renderEditorBody({
   readonly image: WorkspaceImageResult | null;
   readonly lineMark: FileLineMark | null;
   readonly markdown: boolean;
+  readonly missing: boolean;
   readonly onNavigate: (path: string) => void;
   readonly preview: WorkspaceFilePreview | null;
   readonly showSource: boolean;
@@ -225,13 +275,21 @@ function renderEditorBody({
   if (viewerLoading) {
     return <div className="diff-panel__empty">Loading file...</div>;
   }
+  if (missing) {
+    return (
+      <div className="diff-panel__empty file-editor__no-preview" data-testid="file-missing">
+        <strong>This file no longer exists</strong>
+        <span>It was deleted or moved. This tab shows it again if it comes back.</span>
+      </div>
+    );
+  }
   if (viewerError) {
     return <div className="diff-panel__empty">{viewerError}</div>;
   }
   if (image?.kind === "image") {
     return (
       <FileImageViewer
-        key={image.src}
+        key={activePath}
         mimeType={image.mimeType}
         path={activePath}
         siblings={image.siblings}
@@ -312,12 +370,13 @@ function SourceView({
   const lines = content.split("\n");
   const highlightActive = language !== undefined && lines.length <= MAX_HIGHLIGHTED_LINES;
   const firstMarkedRef = useRef<HTMLDivElement | null>(null);
+  // Scroll to a marked line when it is shown, not again when the file changes on disk.
   useEffect(() => {
     const line = firstMarkedRef.current;
     if (line) {
       scrollIntoContainer(line, ".file-editor__body");
     }
-  }, [content, lineMark, path]);
+  }, [lineMark, path]);
   return (
     <pre
       className="file-editor__source file-workbench__preview"

@@ -59,6 +59,7 @@ import {
 import { getChangedFiles, getFileDiff, stageFile } from "./platform/files/app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./platform/files/app-store-files";
 import { WorkspaceImageServer } from "./platform/files/workspace-images";
+import { WorkspaceFileWatcher } from "./platform/files/workspace-file-watcher";
 import { WORKSPACE_IMAGE_HOST } from "../contracts/workspace-images";
 import { resolveExistingWorkspacePath } from "./platform/files/workspace-paths";
 import { MAIN_DEV_RELOAD_MARKER } from "./dev-reload-main-probe";
@@ -108,6 +109,37 @@ protocol.registerSchemesAsPrivileged([
 /** Image files a window's Files tabs show, served on the tool-image scheme's workspace host. */
 const workspaceImages = new WorkspaceImageServer();
 const workspaceImageWindows = new WeakSet<BrowserWindow>();
+/** Files open as tabs, per window, so a tab re-reads its file when it changes on disk. */
+const fileTabWindows = new Map<number, BrowserWindow>();
+const fileTabWindowHooks = new WeakSet<BrowserWindow>();
+const workspaceFileWatcher = new WorkspaceFileWatcher((windowId, change) => {
+  const window = fileTabWindows.get(windowId);
+  if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+    window.webContents.send(desktopIpc.workspaceFileChanged, change);
+});
+function watchWorkspaceFiles(
+  window: BrowserWindow,
+  workspaceId: string,
+  workspacePath: string,
+  paths: readonly string[],
+): Promise<void> {
+  const windowId = window.id;
+  fileTabWindows.set(windowId, window);
+  if (!fileTabWindowHooks.has(window)) {
+    fileTabWindowHooks.add(window);
+    const stop = () => {
+      fileTabWindows.delete(windowId);
+      workspaceFileWatcher.dispose(windowId);
+    };
+    window.once("closed", stop);
+    // A reloaded or crashed renderer sends its open tabs again once it mounts.
+    window.webContents.on("render-process-gone", stop);
+    window.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) stop();
+    });
+  }
+  return workspaceFileWatcher.set(windowId, workspaceId, workspacePath, paths);
+}
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
 const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
 const windowTestMode = appTestMode ?? "foreground";
@@ -1305,6 +1337,7 @@ app
           }
           return workspaceImages.open(window.id, workspacePath, filePath);
         },
+        watchWorkspaceFiles,
         revealWorkspaceFile: async (workspacePath, filePath) => {
           const resolved = await resolveExistingWorkspacePath(workspacePath, filePath);
           shell.showItemInFolder(resolved);

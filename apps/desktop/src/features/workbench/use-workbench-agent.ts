@@ -315,6 +315,7 @@ export function useWorkbenchAgent(
               );
             }
           } else if (command.tool === "files" && command.path) {
+            const opens = value.fileRefresh;
             await value.openFile(
               { workspaceId: request.target.workspaceId, path: command.path },
               () => checkTarget(request),
@@ -325,8 +326,21 @@ export function useWorkbenchAgent(
               (next) =>
                 next.view.visibility === "visible" &&
                 next.view.selection.kind === "tool" &&
-                next.view.selection.toolId === id,
+                next.view.selection.toolId === id &&
+                next.fileRefresh > opens,
             );
+            // Opening an already open file re-reads it; answer once the tab shows that read.
+            const refresh = current.current.workbench.fileRefresh;
+            await waitForDom(request, () => {
+              const editor = [
+                ...document.querySelectorAll<HTMLElement>('[data-testid="file-editor"]'),
+              ].find((element) => element.dataset.path === command.path);
+              return Boolean(
+                editor &&
+                editor.dataset.state !== "loading" &&
+                Number(editor.dataset.refresh) >= refresh,
+              );
+            });
             break;
           } else if (command.tool === "terminal") {
             // The most recently used terminal, or a first one; new=true always adds a tab.
