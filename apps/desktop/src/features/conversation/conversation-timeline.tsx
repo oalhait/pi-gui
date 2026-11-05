@@ -470,11 +470,16 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
     return a.durationMs === b.durationMs;
   }
   if (a.kind === "working" && b.kind === "working") {
-    // The line ticks its own elapsed time, so only a new run start or retry redraws it.
+    // The line ticks its own elapsed time, so only a new run start, wait or retry redraws it.
     return (
       a.startedAt === b.startedAt &&
       a.connectionRetry?.attempt === b.connectionRetry?.attempt &&
-      a.connectionRetry?.retryAt === b.connectionRetry?.retryAt
+      a.connectionRetry?.retryAt === b.connectionRetry?.retryAt &&
+      a.modelWait?.since === b.modelWait?.since &&
+      a.modelWait?.retry?.attempt === b.modelWait?.retry?.attempt &&
+      a.modelWait?.retry?.retryAt === b.modelWait?.retry?.retryAt &&
+      a.largeContext?.tokens === b.largeContext?.tokens &&
+      a.largeContext?.cacheExpired === b.largeContext?.cacheExpired
     );
   }
   if (a.kind === "turn-changes" && b.kind === "turn-changes") {

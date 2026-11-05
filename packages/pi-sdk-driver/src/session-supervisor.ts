@@ -34,6 +34,7 @@ import type {
   HostUiResponse,
   SessionConfig,
   SessionConnectionRetry,
+  SessionModelWait,
   SessionDriverEvent,
   SessionEventListener,
   SessionModelSelection,
@@ -310,6 +311,8 @@ interface ManagedSessionRecord {
   connectionResume:
     | { readonly startedAt: number; attempt: number; controller?: AbortController | undefined }
     | undefined;
+  /** The running turn has asked the model and nothing has streamed back yet. */
+  modelWait: SessionModelWait | undefined;
 }
 
 type NotifyHostUiRequest = Extract<
@@ -2010,6 +2013,7 @@ export class SessionSupervisor {
       extensionCommandsRunning: 0,
       connectionRetry: undefined,
       connectionResume: undefined,
+      modelWait: undefined,
     };
     return record;
   }
@@ -2929,6 +2933,8 @@ export class SessionSupervisor {
         return [sessionUpdatedEvent(record)];
       case "turn_start":
         record.status = "running";
+        // Pi asks the model next. A retry's backoff has ended once its turn starts.
+        record.modelWait = { since: timestamp, ...retryWithoutBackoff(record.modelWait) };
         return [sessionUpdatedEvent(record)];
       case "message_start":
       case "message_end":
@@ -2957,6 +2963,7 @@ export class SessionSupervisor {
           this.appendCustomMessageItem(record, event.message);
         }
         if (event.type === "message_end" && event.message.role === "assistant") {
+          record.modelWait = undefined;
           // A reply got through: the connection is back, and a later loss starts a new budget.
           if (event.message.stopReason !== "error") {
             record.connectionResume = undefined;
@@ -2970,6 +2977,10 @@ export class SessionSupervisor {
         return [sessionUpdatedEvent(record)];
       case "message_update":
         this.updatePreviewFromMessage(record, event.message);
+        // The first streamed output of any kind (text, reasoning, a tool call) ends the wait.
+        if (event.message.role === "assistant" && event.assistantMessageEvent.type !== "start") {
+          record.modelWait = undefined;
+        }
         if (
           event.message.role === "assistant" &&
           event.assistantMessageEvent.type === "text_delta"
@@ -3076,6 +3087,22 @@ export class SessionSupervisor {
           this.queueDriverEvents(record, [sessionUpdatedEvent(record)], { persistSnapshot: false });
         });
         return [];
+      case "auto_retry_start":
+        // Pi backs off before retrying a transient failure (overloaded, rate limited, 5xx).
+        record.modelWait = {
+          since: timestamp,
+          retry: {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            retryAt: new Date(Date.now() + event.delayMs).toISOString(),
+            error: event.errorMessage,
+          },
+        };
+        return [sessionUpdatedEvent(record)];
+      case "auto_retry_end":
+        // A successful retry has already streamed; a failed or cancelled one ends the run.
+        record.modelWait = undefined;
+        return [sessionUpdatedEvent(record)];
       case "agent_end": {
         // Pi can retry or continue from agent_before_settle after agent_end.
         // Keep one desktop run alive until Pi publishes its settled boundary.
@@ -3098,6 +3125,7 @@ export class SessionSupervisor {
         record.stopBeforeSettle = false;
         record.connectionResume = undefined;
         record.connectionRetry = undefined;
+        record.modelWait = undefined;
         this.markStoppedReply(
           record,
           stopped && record.session
@@ -4072,6 +4100,13 @@ function findCustomMessageEntryId(
     }
   }
   return undefined;
+}
+
+/** The retry a new turn sends: its backoff is over, so it no longer has a retry time. */
+function retryWithoutBackoff(wait: SessionModelWait | undefined): Pick<SessionModelWait, "retry"> {
+  if (!wait?.retry) return {};
+  const { retryAt: _retryAt, ...retry } = wait.retry;
+  return { retry };
 }
 
 function sessionUpdatedEvent(record: ManagedSessionRecord): SessionDriverEvent {

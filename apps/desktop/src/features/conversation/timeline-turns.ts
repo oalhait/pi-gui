@@ -1,12 +1,37 @@
 import type { TurnChangeSummary } from "../../../contracts/review";
-import type { SessionConnectionRetry } from "@pi-gui/session-driver";
+import type {
+  SessionConnectionRetry,
+  SessionModelWait,
+  SessionUsageSnapshot,
+} from "@pi-gui/session-driver";
 import type {
   DisplayTimelineItem,
+  TimelineLargeContext,
   TimelineTranscriptItem,
   TimelineTurnMarker,
 } from "../../../contracts/timeline-types";
 
 const MIN_WORKED_DURATION_MS = 1_000;
+
+/** A context this large takes the provider noticeably longer to read before it answers. */
+export const LARGE_CONTEXT_TOKENS = 150_000;
+
+/**
+ * Whether the request the turn waits on carries a large context, and whether the provider's
+ * prompt cache had lapsed when it started. Unknown or warm caches are not called expired.
+ */
+export function largeContextForWait(
+  modelWait: SessionModelWait | undefined,
+  usage: SessionUsageSnapshot | undefined,
+): TimelineLargeContext | undefined {
+  const tokens = usage?.context?.tokens;
+  if (!modelWait || modelWait.retry || !tokens || tokens < LARGE_CONTEXT_TOKENS) return undefined;
+  const expiresAt = usage.cache.expiresAt ? Date.parse(usage.cache.expiresAt) : Number.NaN;
+  const cacheExpired = !Number.isNaN(expiresAt) && expiresAt <= Date.parse(modelWait.since);
+  // A warm cache answers quickly, so only a lapsed or unknown cache earns the note.
+  if (!cacheExpired && !Number.isNaN(expiresAt)) return undefined;
+  return { tokens, cacheExpired };
+}
 
 function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
   return item?.kind === "message" && item.role === "user";
@@ -39,6 +64,9 @@ export function buildDisplayTimelineItems(
     readonly runningSince?: string;
     /** The running turn waits out a lost provider connection. */
     readonly connectionRetry?: SessionConnectionRetry | undefined;
+    /** The running turn waits for the model's first output or Pi's retry of a request. */
+    readonly modelWait?: SessionModelWait | undefined;
+    readonly largeContext?: TimelineLargeContext | undefined;
     readonly turnChanges?: readonly TurnChangeSummary[];
     /** The Show thinking setting is Hidden: reasoning rows are left out. */
     readonly hideThinking?: boolean;
@@ -130,6 +158,8 @@ export function buildDisplayTimelineItems(
       id: "working-indicator",
       startedAt: options.runningSince,
       ...(options.connectionRetry ? { connectionRetry: options.connectionRetry } : {}),
+      ...(options.modelWait ? { modelWait: options.modelWait } : {}),
+      ...(options.modelWait && options.largeContext ? { largeContext: options.largeContext } : {}),
     });
   }
   return result;

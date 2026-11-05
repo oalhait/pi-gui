@@ -12,17 +12,23 @@ export interface ScriptedChatRequest {
 }
 
 /**
- * One model reply: plain text, or a single tool call that pi runs before asking again.
+ * One model reply: plain text, a single tool call that pi runs before asking again, or an
+ * HTTP error. `holdBeforeFirstChunk` sends the response headers and then nothing until it
+ * settles, like a provider that accepted the request but has not started answering.
  * `thinking` streams first as reasoning chunks (`reasoning_content`, which pi reads as a
  * thinking block); `holdAfterThinking` keeps the reply waiting there until it settles.
+ * `promptTokens` reports that many input tokens in the reply's usage, as for a large context.
  */
 export type ScriptedReply =
   | {
       readonly text: string;
+      readonly promptTokens?: number;
+      readonly holdBeforeFirstChunk?: Promise<void>;
       readonly thinking?: readonly string[];
       readonly holdAfterThinking?: Promise<void>;
     }
-  | { readonly tool: string; readonly args: Readonly<Record<string, unknown>> };
+  | { readonly tool: string; readonly args: Readonly<Record<string, unknown>> }
+  | { readonly error: { readonly status: number; readonly message: string } };
 
 export interface ScriptedOpenAiServer {
   readonly baseUrl: string;
@@ -57,7 +63,13 @@ export async function startScriptedOpenAiServer(
       };
       requests.push(scripted);
       const next = reply(scripted);
+      if ("error" in next) {
+        response.writeHead(next.error.status, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: { message: next.error.message } }));
+        return;
+      }
       response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.flushHeaders();
       const chunk = (delta: unknown, finishReason: string | null) =>
         response.write(
           `data: ${JSON.stringify({
@@ -85,12 +97,29 @@ export async function startScriptedOpenAiServer(
         );
         chunk({}, "tool_calls");
       } else {
+        if (next.holdBeforeFirstChunk) await next.holdBeforeFirstChunk;
+        if (response.destroyed) return;
         for (const part of next.thinking ?? []) {
           chunk({ role: "assistant", reasoning_content: part }, null);
         }
         if (next.holdAfterThinking) await next.holdAfterThinking;
         chunk({ role: "assistant", content: next.text }, null);
         chunk({}, "stop");
+        if (next.promptTokens !== undefined) {
+          response.write(
+            `data: ${JSON.stringify({
+              id: "scripted",
+              object: "chat.completion.chunk",
+              model: "scripted",
+              choices: [],
+              usage: {
+                prompt_tokens: next.promptTokens,
+                completion_tokens: 1,
+                total_tokens: next.promptTokens + 1,
+              },
+            })}\n\n`,
+          );
+        }
       }
       response.end("data: [DONE]\n\n");
     };

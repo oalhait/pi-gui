@@ -620,6 +620,17 @@
   gap: 10px;
 }
 
+.timeline-working--model-wait {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.timeline-working__note {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
 .timeline-working__cancel {
   padding: 0;
   border: 0;

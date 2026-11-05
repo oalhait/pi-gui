@@ -1,5 +1,6 @@
 import type {
   SessionConnectionRetry,
+  SessionModelWait,
   SessionTranscriptCard,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
@@ -102,6 +103,16 @@ export interface TimelineWorkingIndicator {
   readonly startedAt?: string;
   /** The run lost its provider connection: the line says so and offers Cancel. */
   readonly connectionRetry?: SessionConnectionRetry;
+  /** The turn waits for the model's first output, or for Pi to retry a failed request. */
+  readonly modelWait?: SessionModelWait;
+  /** The request carries a large context, so the first output can take a while. */
+  readonly largeContext?: TimelineLargeContext;
+}
+
+export interface TimelineLargeContext {
+  readonly tokens: number;
+  /** The provider's prompt cache had lapsed when the request started, so all of it is reread. */
+  readonly cacheExpired: boolean;
 }
 
 export type DisplayTimelineItem =

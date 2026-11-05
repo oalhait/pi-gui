@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   SessionConnectionRetry,
+  SessionModelWait,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
 } from "@pi-gui/session-driver";
 import type {
   DisplayTimelineItem,
   TimelineActivity,
+  TimelineLargeContext,
   TimelineToolCall,
   TimelineSummary,
   TimelineTurnMarker,
@@ -43,6 +45,7 @@ import {
 } from "../../ui/icons";
 import { extensionToLanguage } from "../../ui/syntax-highlight";
 import { formatElapsedDuration } from "./elapsed-duration";
+import { modelWaitText } from "./model-wait-label";
 import { TimelineThinkingItem } from "./timeline-thinking";
 
 export function TimelineItem({
@@ -577,9 +580,49 @@ function TimelineWorkingItem({
   if (item.connectionRetry) {
     return <ConnectionRetryLine retry={item.connectionRetry} onCancel={onStopRun} />;
   }
+  if (item.modelWait) {
+    return <ModelWaitLine wait={item.modelWait} largeContext={item.largeContext} />;
+  }
   return (
     <div className="timeline-working" data-testid="timeline-working">
       <span className="timeline-working__label">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * "Waiting for the model · 12s" until the first output, with a note when the context is large
+ * or the wait passes a minute; "Model request failed (provider overloaded). Retrying in 4s"
+ * while Pi backs off before a retry.
+ */
+function ModelWaitLine({
+  wait,
+  largeContext,
+}: {
+  readonly wait: SessionModelWait;
+  readonly largeContext?: TimelineLargeContext | undefined;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [wait]);
+  const text = modelWaitText(wait, largeContext, now);
+  return (
+    <div className="timeline-working timeline-working--model-wait" data-testid="timeline-working">
+      <span
+        className="timeline-working__label"
+        data-testid="timeline-model-wait"
+        title={wait.retry?.error}
+      >
+        {text.label}
+      </span>
+      {text.notes.map((note) => (
+        <span key={note} className="timeline-working__note" data-testid="timeline-model-wait-note">
+          {note}
+        </span>
+      ))}
     </div>
   );
 }

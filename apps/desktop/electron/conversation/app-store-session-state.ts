@@ -54,7 +54,14 @@ export function updateSessionRecord(
     readonly snapshot?: Partial<
       Pick<
         SessionSnapshot,
-        "title" | "updatedAt" | "archivedAt" | "preview" | "status" | "config" | "connectionRetry"
+        | "title"
+        | "updatedAt"
+        | "archivedAt"
+        | "preview"
+        | "status"
+        | "config"
+        | "connectionRetry"
+        | "modelWait"
       >
     >;
     readonly status?: SessionRecord["status"];
@@ -88,6 +95,12 @@ export function updateSessionRecord(
         : options.snapshot?.status !== undefined
           ? options.snapshot.connectionRetry
           : session.connectionRetry,
+    modelWait:
+      nextStatus !== "running"
+        ? undefined
+        : options.snapshot?.status !== undefined
+          ? options.snapshot.modelWait
+          : session.modelWait,
     hasUnseenUpdate: hasUnseenSessionUpdate(
       nextStatus,
       updatedAt,

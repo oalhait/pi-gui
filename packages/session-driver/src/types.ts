@@ -57,6 +57,30 @@ export interface SessionSnapshot {
   readonly lastRunOutcome?: SessionRunOutcome;
   /** Present while a running run waits out a lost provider connection. */
   readonly connectionRetry?: SessionConnectionRetry;
+  /** Present while a running run has asked the model and no output has arrived yet. */
+  readonly modelWait?: SessionModelWait;
+}
+
+/**
+ * The running turn's model request has produced no output yet: it is being sent, the
+ * provider has not started answering, or Pi is backing off before retrying a failed request.
+ * Cleared by the first streamed output (text, reasoning or a tool call) and when the run ends.
+ */
+export interface SessionModelWait {
+  /** When the current request (or the retry after a failed one) started. */
+  readonly since: Timestamp;
+  /** Pi's automatic retry after a transient failure, such as an overloaded provider. */
+  readonly retry?: SessionModelRetry;
+}
+
+export interface SessionModelRetry {
+  /** The retry this is, starting at 1. */
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  /** When the backoff ends and the retry is sent; absent once it has been sent. */
+  readonly retryAt?: Timestamp;
+  /** The provider error that failed the previous request. */
+  readonly error: string;
 }
 
 /**

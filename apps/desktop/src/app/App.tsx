@@ -285,7 +285,12 @@ export default function App() {
     running: selectedSessionRunning,
     workbench,
   });
-  const timelineRows = useTimelineRows(pins.timeline, selectedSession, turnChanges.turns);
+  const timelineRows = useTimelineRows(
+    pins.timeline,
+    selectedSession,
+    turnChanges.turns,
+    selectedSessionKey ? snapshot?.sessionUsageBySession[selectedSessionKey] : undefined,
+  );
   const viewport = useTimelineViewport({
     sessionKey: selectedSessionKey,
     rows: timelineRows,
