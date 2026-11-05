@@ -33,6 +33,7 @@ import type {
   HostUiRequest,
   HostUiResponse,
   SessionConfig,
+  SessionConnectionRetry,
   SessionDriverEvent,
   SessionEventListener,
   SessionModelSelection,
@@ -122,6 +123,13 @@ import { forcePersistPiSession } from "./compat/pi-session-persistence.js";
 import { createTurnCaptureExtension } from "./turn-capture.js";
 import { createTranscriptIdentityExtension } from "./transcript-identity.js";
 import { createThinkingTimingExtension } from "./thinking-timing.js";
+import {
+  connectionResumeDelayMs,
+  createConnectionResumeExtension,
+  DEFAULT_CONNECTION_RESUME_POLICY,
+  waitForConnectionResume,
+  type ConnectionResumePolicy,
+} from "./connection-resume.js";
 import { createPlanLimitsExtension, readSessionUsage } from "./session-usage.js";
 import {
   createDesktopExtensionBridge,
@@ -188,6 +196,14 @@ export interface PiSdkDriverOptions {
   readonly desktopExtensions?: PiDesktopExtensionObserver;
   readonly onTurnCaptureBoundary?: import("@pi-gui/session-driver").TurnCaptureObserver;
   readonly turnCaptureTimeoutMs?: number;
+  /**
+   * Resuming a run whose provider connection failed after pi's own retries (see
+   * connection-resume.ts). `isOnline` lets a wait end early when the network returns.
+   */
+  readonly connectionResume?: {
+    readonly policy?: ConnectionResumePolicy;
+    readonly isOnline?: () => boolean;
+  };
   readonly generateThreadTitleOverride?: (
     workspace: WorkspaceRef,
     options: import("./thread-title-generator.js").GenerateThreadTitleOptions,
@@ -288,6 +304,12 @@ interface ManagedSessionRecord {
   reloadInFlight: Promise<void> | undefined;
   /** Extension commands (such as `/mcp login`) still running; a reload would end them. */
   extensionCommandsRunning: number;
+  /** Shown while the run waits out a lost provider connection; see waitToResumeConnection. */
+  connectionRetry: SessionConnectionRetry | undefined;
+  /** The run's resumes since its first connection failure; cleared by a reply or settling. */
+  connectionResume:
+    | { readonly startedAt: number; attempt: number; controller?: AbortController | undefined }
+    | undefined;
 }
 
 type NotifyHostUiRequest = Extract<
@@ -339,6 +361,8 @@ export class SessionSupervisor {
   private readonly extensionFlagValuesForSession: PiSdkDriverOptions["extensionFlagValuesForSession"];
   private readonly onTurnCaptureBoundary: PiSdkDriverOptions["onTurnCaptureBoundary"];
   private readonly turnCaptureTimeoutMs: number | undefined;
+  private readonly connectionResumePolicy: ConnectionResumePolicy;
+  private readonly isNetworkOnline: (() => boolean) | undefined;
   private readonly records = new Map<string, ManagedSessionRecord>();
   /** Latest plan limits a provider reported, shared by every session on that provider. */
   private readonly planLimitsByProvider = new Map<string, SessionPlanLimits>();
@@ -367,6 +391,9 @@ export class SessionSupervisor {
     this.extensionFlagValuesForSession = options.extensionFlagValuesForSession;
     this.onTurnCaptureBoundary = options.onTurnCaptureBoundary;
     this.turnCaptureTimeoutMs = options.turnCaptureTimeoutMs;
+    this.connectionResumePolicy =
+      options.connectionResume?.policy ?? DEFAULT_CONNECTION_RESUME_POLICY;
+    this.isNetworkOnline = options.connectionResume?.isOnline;
     this.agentDir = options.agentDir;
   }
 
@@ -447,6 +474,17 @@ export class SessionSupervisor {
             name: "pi-gui-thinking-timing",
             hidden: true,
             factory: createThinkingTimingExtension(),
+          },
+          {
+            name: "pi-gui-connection-resume",
+            hidden: true,
+            factory: createConnectionResumeExtension({
+              waitToResume: (sessionId, errorMessage) =>
+                this.waitToResumeConnection(
+                  sessionKey({ workspaceId: workspace.workspaceId, sessionId }),
+                  errorMessage,
+                ),
+            }),
           },
           ...(this.onTurnCaptureBoundary
             ? [
@@ -1477,6 +1515,8 @@ export class SessionSupervisor {
 
     record.cancellationRequested = true;
     if (record.runAwaitingSettle) record.stopBeforeSettle = true;
+    // pi's abort waits for the settle boundary, where a connection wait would hold it.
+    record.connectionResume?.controller?.abort();
     if (record.promptStarting && !record.session.isStreaming) {
       record.abortOnRunStart = true;
     }
@@ -1503,6 +1543,55 @@ export class SessionSupervisor {
     await this.persistSnapshot(record);
     await this.emit(record, sessionUpdatedEvent(record));
     this.whenIdle(record);
+  }
+
+  /**
+   * Pi is about to settle a run after a connection failure its own retries did not outlast.
+   * Wait for the next resume in the policy, showing it on the snapshot, and resolve true to
+   * continue the run. False lets it settle as failed: the budget is spent, or the person
+   * stopped the run or closed the session.
+   */
+  private async waitToResumeConnection(key: string, errorMessage: string): Promise<boolean> {
+    const record = this.records.get(key);
+    if (!record || record.closed || record.cancellationRequested) return false;
+    const resume = (record.connectionResume ??= { startedAt: Date.now(), attempt: 0 });
+    const policy = this.connectionResumePolicy;
+    const delayMs = connectionResumeDelayMs(policy, resume.attempt, Date.now() - resume.startedAt);
+    if (delayMs === undefined) {
+      this.setConnectionRetry(record, undefined);
+      return false;
+    }
+    const controller = new AbortController();
+    resume.controller = controller;
+    this.setConnectionRetry(record, {
+      attempt: resume.attempt,
+      retryAt: new Date(Date.now() + delayMs).toISOString(),
+      error: errorMessage,
+    });
+    const outcome = await waitForConnectionResume({
+      delayMs,
+      deadlineAt: resume.startedAt + policy.budgetMs,
+      signal: controller.signal,
+      pollMs: policy.onlinePollMs,
+      isOnline: this.isNetworkOnline,
+    });
+    resume.controller = undefined;
+    if (outcome !== "resume" || record.closed || record.cancellationRequested) {
+      this.setConnectionRetry(record, undefined);
+      return false;
+    }
+    resume.attempt += 1;
+    this.setConnectionRetry(record, { attempt: resume.attempt, error: errorMessage });
+    return true;
+  }
+
+  private setConnectionRetry(
+    record: ManagedSessionRecord,
+    retry: SessionConnectionRetry | undefined,
+  ): void {
+    if (!retry && !record.connectionRetry) return;
+    record.connectionRetry = retry;
+    this.queueDriverEvents(record, [sessionUpdatedEvent(record)], { persistSnapshot: false });
   }
 
   async setSessionModel(sessionRef: SessionRef, selection: SessionModelSelection): Promise<void> {
@@ -1749,6 +1838,7 @@ export class SessionSupervisor {
     }
 
     record.closed = true;
+    record.connectionResume?.controller?.abort();
     record.runningRunId = undefined;
     record.status = "idle";
     this.clearExtensionUiState(record);
@@ -1918,6 +2008,8 @@ export class SessionSupervisor {
       reloadPending: false,
       reloadInFlight: undefined,
       extensionCommandsRunning: 0,
+      connectionRetry: undefined,
+      connectionResume: undefined,
     };
     return record;
   }
@@ -2865,6 +2957,11 @@ export class SessionSupervisor {
           this.appendCustomMessageItem(record, event.message);
         }
         if (event.type === "message_end" && event.message.role === "assistant") {
+          // A reply got through: the connection is back, and a later loss starts a new budget.
+          if (event.message.stopReason !== "error") {
+            record.connectionResume = undefined;
+            record.connectionRetry = undefined;
+          }
           return toDriverEvents(
             { type: "assistantMessageEnded", sessionRef: record.ref, timestamp },
             record,
@@ -2999,6 +3096,8 @@ export class SessionSupervisor {
         record.cancellationRequested = false;
         record.runAwaitingSettle = false;
         record.stopBeforeSettle = false;
+        record.connectionResume = undefined;
+        record.connectionRetry = undefined;
         this.markStoppedReply(
           record,
           stopped && record.session

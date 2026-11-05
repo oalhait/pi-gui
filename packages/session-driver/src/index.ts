@@ -27,6 +27,7 @@ export type {
   SessionConfig,
   SessionDriver,
   SessionDriverEvent,
+  SessionConnectionRetry,
   SessionErrorInfo,
   SessionEventListener,
   SessionId,

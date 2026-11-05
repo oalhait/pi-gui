@@ -13,6 +13,7 @@ import type {
   SessionAttachment,
   SessionConfig,
   SessionErrorInfo,
+  SessionConnectionRetry,
   SessionRef,
   SessionSnapshot,
   SessionStatus,
@@ -54,6 +55,7 @@ export interface SnapshotSource {
   readonly runningRunId: string | undefined;
   readonly queuedMessages: readonly SessionQueuedMessage[];
   readonly usage?: SessionUsageSnapshot | undefined;
+  readonly connectionRetry?: SessionConnectionRetry | undefined;
   readonly session?:
     | {
         readonly messages: readonly unknown[];
@@ -141,6 +143,9 @@ export function buildSnapshot(source: SnapshotSource): SessionSnapshot {
     ...(source.runningRunId !== undefined ? { runningRunId: source.runningRunId } : {}),
     ...(source.usage ? { usage: source.usage } : {}),
     ...(outcome ? { lastRunOutcome: outcome } : {}),
+    ...(source.connectionRetry && source.status === "running"
+      ? { connectionRetry: { ...source.connectionRetry } }
+      : {}),
     ...(source.queuedMessages.length > 0
       ? {
           queuedMessages: source.queuedMessages.map((message) => ({

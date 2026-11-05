@@ -55,6 +55,21 @@ export interface SessionSnapshot {
   readonly usage?: SessionUsageSnapshot;
   /** Absent until the session has an assistant reply. */
   readonly lastRunOutcome?: SessionRunOutcome;
+  /** Present while a running run waits out a lost provider connection. */
+  readonly connectionRetry?: SessionConnectionRetry;
+}
+
+/**
+ * A run whose provider connection failed after pi's own retries, kept open to be resumed.
+ * Cleared when a reply arrives or the run settles.
+ */
+export interface SessionConnectionRetry {
+  /** Resumes started so far. */
+  readonly attempt: number;
+  /** When the next resume starts; absent while one is in flight. */
+  readonly retryAt?: Timestamp;
+  /** The provider error that ended the last attempt. */
+  readonly error: string;
 }
 
 export interface SessionImageAttachment {
