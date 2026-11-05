@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { access, realpath, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
@@ -336,6 +337,9 @@ interface PromptTemplateAdapter {
 }
 
 const NEW_THREAD_PLACEHOLDER_TITLE = "New thread";
+
+/** The session whose queued events are being delivered in this async context. */
+const deliveringEventsFor = new AsyncLocalStorage<ManagedSessionRecord>();
 
 interface SkillAdapter {
   readonly name: string;
@@ -1543,6 +1547,12 @@ export class SessionSupervisor {
     }).catch(() => undefined);
     record.runningRunId = undefined;
     record.status = "idle";
+    record.modelWait = undefined;
+    // Deliver the stopped run's queued events first. They carry the session entry IDs of the
+    // run's messages (userMessagePersisted), and publishing idle ahead of them let the app
+    // offer Edit on a row it could not yet identify. A listener that stops a run from inside
+    // this session's own event delivery must not wait on itself.
+    if (deliveringEventsFor.getStore() !== record) await record.eventQueue;
     await this.persistSnapshot(record);
     await this.emit(record, sessionUpdatedEvent(record));
     this.whenIdle(record);
@@ -1804,7 +1814,7 @@ export class SessionSupervisor {
       .find((candidate) => candidate.id === sourceMessageId);
     if (entry?.type !== "message" || entry.message.role !== "user") {
       throw new Error(
-        `Cannot edit a message in session ${sessionKey(sessionRef)}: no user message ${sourceMessageId}.`,
+        `This message is not on the thread's current branch, so it can't be edited (no user message ${sourceMessageId} in session ${sessionKey(sessionRef)}).`,
       );
     }
     // pi's /tree semantics: selecting a user entry moves the leaf to its parent and returns
@@ -2844,14 +2854,15 @@ export class SessionSupervisor {
 
     record.eventQueue = chainRecoveringEventQueue(
       record.eventQueue,
-      async () => {
-        if (options?.persistSnapshot !== false) {
-          await this.persistSnapshot(record);
-        }
-        for (const event of events) {
-          await this.emit(record, event);
-        }
-      },
+      () =>
+        deliveringEventsFor.run(record, async () => {
+          if (options?.persistSnapshot !== false) {
+            await this.persistSnapshot(record);
+          }
+          for (const event of events) {
+            await this.emit(record, event);
+          }
+        }),
       (error) => {
         // Contain the failure so the queue keeps flowing. A rethrow here would
         // leave record.eventQueue rejected and freeze the session forever.

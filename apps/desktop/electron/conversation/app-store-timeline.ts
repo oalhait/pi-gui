@@ -105,6 +105,40 @@ export function trackUnpersistedUserMessage(
     unpersistedUserMessagesBySession.set(key, [...pending, messageId]);
 }
 
+type UserRow = Extract<SessionTranscriptItem, { kind: "message" }>;
+
+function userRows(transcript: readonly (TranscriptMessage | SessionTranscriptItem)[]): UserRow[] {
+  return transcript.filter(
+    (item): item is UserRow => item.kind === "message" && item.role === "user",
+  );
+}
+
+/**
+ * The session entry ID of the user row someone asked to edit, given by its row ID or entry ID.
+ * A row sent in this app run gets its entry ID when Pi reports it (userMessagePersisted). One
+ * that never got it is matched against Pi's current branch: the user entry at the same place
+ * counting from the newest, if its text agrees, or else the only entry with that text.
+ * Undefined when the row is unknown or nothing on the branch matches it.
+ */
+export function resolveUserEntryId(
+  transcript: readonly TranscriptMessage[],
+  branch: readonly SessionTranscriptItem[],
+  messageId: string,
+): string | undefined {
+  const rows = userRows(transcript);
+  const index = rows.findIndex((row) => row.id === messageId || row.sourceMessageId === messageId);
+  const row = rows[index];
+  if (!row) return undefined;
+  if (row.sourceMessageId) return row.sourceMessageId;
+  const entries = userRows(branch);
+  const text = row.text.trim();
+  const entryId = (entry: UserRow) => entry.sourceMessageId ?? entry.id;
+  const samePlace = entries[entries.length - (rows.length - index)];
+  if (samePlace && samePlace.text.trim() === text) return entryId(samePlace);
+  const sameText = entries.filter((entry) => entry.text.trim() === text);
+  return sameText.length === 1 ? entryId(sameText[0]!) : undefined;
+}
+
 export function appendQueuedUserMessage(
   transcriptCache: Map<string, readonly TranscriptMessage[]>,
   sessionRef: SessionRef,

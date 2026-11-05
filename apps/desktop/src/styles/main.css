@@ -149,6 +149,29 @@
   overflow-y: auto;
 }
 
+.composer__error--dismissible {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.composer__error--dismissible .composer__error-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer__error-dismiss {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
 /* Diff review panel */
 
 .diff-panel {

@@ -483,6 +483,8 @@ export default function App() {
     closeForkModal,
     openForkModal,
     editFromMessage,
+    editError,
+    dismissEditError,
     handleForkSubmit,
     canUseWorktree,
   } = useTreeForkModals({
@@ -1245,7 +1247,8 @@ export default function App() {
                 onSubmit={submitComposerDraft}
                 onStop={stopCurrentRun}
                 selectedSession={selectedSession}
-                lastError={snapshot.lastError}
+                lastError={editError ?? snapshot.lastError}
+                onDismissError={editError ? dismissEditError : undefined}
                 selectedSlashCommand={
                   slashMenu.activeSlashOptionCommand ?? slashMenu.selectedSlashCommand
                 }

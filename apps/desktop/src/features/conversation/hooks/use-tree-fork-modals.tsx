@@ -49,6 +49,12 @@ interface UseTreeForkModalsParams {
   readonly focusComposer: () => void;
 }
 
+/** An IPC rejection's own message, without Electron's "Error invoking remote method" prefix. */
+function ipcErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, "");
+}
+
 export function useTreeForkModals(params: UseTreeForkModalsParams) {
   const {
     api,
@@ -75,6 +81,7 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
   });
 
   const editingMessage = useRef(false);
+  const [editError, setEditError] = useState<{ sessionKey: string; message: string }>();
   const editFromMessage = useCallback(
     (message: SessionTranscriptMessage) => {
       if (
@@ -86,6 +93,8 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
       )
         return;
       editingMessage.current = true;
+      const sessionKey = selectedSessionKey;
+      setEditError(undefined);
       // Rewind in place, as pi's /tree does for a user entry: the thread moves to just before
       // the message, its text returns to the composer, and later turns stay in /tree.
       void api
@@ -108,18 +117,28 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
           focusComposer();
         })
         .catch((error: unknown) => {
-          setSnapshot((current) =>
-            current
-              ? { ...current, lastError: error instanceof Error ? error.message : String(error) }
-              : current,
-          );
+          // Kept apart from lastError, which the next app snapshot replaces, so the failure
+          // stays readable until the person dismisses it.
+          setEditError({
+            sessionKey,
+            message: `Couldn't edit the message. ${ipcErrorText(error)}`,
+          });
         })
         .finally(() => {
           editingMessage.current = false;
         });
     },
-    [api, selectedWorkspace, selectedSession, setSnapshot, setComposerDraft, focusComposer],
+    [
+      api,
+      selectedWorkspace,
+      selectedSession,
+      selectedSessionKey,
+      setSnapshot,
+      setComposerDraft,
+      focusComposer,
+    ],
   );
+  const dismissEditError = useCallback(() => setEditError(undefined), []);
 
   const closeTreeModal = useCallback(() => {
     setTreeModalState((current) =>
@@ -308,6 +327,9 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     closeForkModal,
     openForkModal,
     editFromMessage: selectedSession?.status === "running" ? undefined : editFromMessage,
+    /** A failed Edit for the selected thread, shown until dismissed or the next Edit. */
+    editError: editError?.sessionKey === selectedSessionKey ? editError.message : undefined,
+    dismissEditError,
     handleForkSubmit,
     canUseWorktree: Boolean(rootWorkspace),
   };
