@@ -70,6 +70,8 @@ export interface NotificationPreferences {
   readonly backgroundCompletion: boolean;
   readonly backgroundFailure: boolean;
   readonly attentionNeeded: boolean;
+  /** Completion and failure notifications show the start of the reply, not a generic line. */
+  readonly showReplyPreview: boolean;
 }
 
 export interface ComposerImageAttachment {
@@ -561,6 +563,7 @@ export function createEmptyDesktopAppState(): DesktopAppState {
       backgroundCompletion: true,
       backgroundFailure: true,
       attentionNeeded: true,
+      showReplyPreview: true,
     },
     integratedTerminalShell: "",
     lastViewedAtBySession: {},

@@ -62,13 +62,66 @@ export async function emitCompletedEvent(
   await emitTestSessionEvent(harness, completedEvent);
 }
 
+/** Streams one finished assistant message: its text deltas, then its end. */
+export async function emitAssistantReply(
+  harness: DesktopHarness,
+  session: SessionContext,
+  runId: string,
+  chunks: readonly string[],
+): Promise<void> {
+  for (const text of chunks) {
+    await emitTestSessionEvent(harness, {
+      type: "assistantDelta",
+      sessionRef: session.sessionRef,
+      timestamp: new Date().toISOString(),
+      runId,
+      text,
+    });
+  }
+  await emitTestSessionEvent(harness, {
+    type: "assistantMessageEnded",
+    sessionRef: session.sessionRef,
+    timestamp: new Date().toISOString(),
+    runId,
+  });
+}
+
+export async function emitToolCall(
+  harness: DesktopHarness,
+  session: SessionContext,
+  runId: string,
+  callId: string,
+): Promise<void> {
+  const base = { sessionRef: session.sessionRef, runId } as const;
+  await emitTestSessionEvent(harness, {
+    ...base,
+    type: "toolStarted",
+    timestamp: new Date().toISOString(),
+    toolName: "bash",
+    callId,
+    input: { command: "ls" },
+  });
+  await emitTestSessionEvent(harness, {
+    ...base,
+    type: "toolFinished",
+    timestamp: new Date().toISOString(),
+    callId,
+    success: true,
+    output: "file.txt",
+  });
+}
+
 export async function emitFailedEvent(
   harness: DesktopHarness,
   session: SessionContext,
   label: string,
   message: string,
+  partialReply?: readonly string[],
 ): Promise<void> {
   const runId = await emitRunningEvent(harness, session, label);
+  if (partialReply) {
+    await emitAssistantReply(harness, session, runId, partialReply);
+  }
   const failedAt = new Date(Date.now() + 1_000).toISOString();
   const failedEvent: Extract<SessionDriverEvent, { type: "runFailed" }> = {
     type: "runFailed",

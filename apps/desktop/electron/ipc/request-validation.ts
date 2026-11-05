@@ -322,7 +322,12 @@ export function expectSetChildSupervisionLoopInput(value: unknown): SetChildSupe
 export function expectNotificationPreferences(value: unknown): Partial<NotificationPreferences> {
   const record = expectRecord(value, "preferences");
   let preferences: Partial<NotificationPreferences> = {};
-  for (const key of ["backgroundCompletion", "backgroundFailure", "attentionNeeded"] as const) {
+  for (const key of [
+    "backgroundCompletion",
+    "backgroundFailure",
+    "attentionNeeded",
+    "showReplyPreview",
+  ] as const) {
     if (Object.hasOwn(record, key)) {
       preferences = { ...preferences, [key]: expectBoolean(record[key], `preferences.${key}`) };
     }

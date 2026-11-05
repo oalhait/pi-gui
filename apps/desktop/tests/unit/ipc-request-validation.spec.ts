@@ -151,7 +151,12 @@ test("IPC request validation checks discriminated command records", () => {
 });
 
 test("notification checkbox patches validate only provided fields", () => {
-  for (const key of ["backgroundCompletion", "backgroundFailure", "attentionNeeded"] as const) {
+  for (const key of [
+    "backgroundCompletion",
+    "backgroundFailure",
+    "attentionNeeded",
+    "showReplyPreview",
+  ] as const) {
     expect(expectNotificationPreferences({ [key]: false })).toEqual({ [key]: false });
     expect(() => expectNotificationPreferences({ [key]: "false" })).toThrow(
       `preferences.${key} must be a boolean`,

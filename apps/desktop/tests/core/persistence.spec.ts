@@ -411,6 +411,7 @@ test("preserves durable ui state when one startup workspace is unavailable", asy
           backgroundCompletion: false,
           backgroundFailure: true,
           attentionNeeded: false,
+          showReplyPreview: false,
         });
         await app.setIntegratedTerminalShell("/bin/zsh");
         await app.setThemePresetId("github");
@@ -456,6 +457,7 @@ test("preserves durable ui state when one startup workspace is unavailable", asy
       backgroundCompletion: false,
       backgroundFailure: true,
       attentionNeeded: false,
+      showReplyPreview: false,
     },
     integratedTerminalShell: "/bin/zsh",
     pinnedAtBySession: {
@@ -487,6 +489,7 @@ test("preserves durable ui state when one startup workspace is unavailable", asy
       backgroundCompletion: false,
       backgroundFailure: true,
       attentionNeeded: false,
+      showReplyPreview: false,
     });
     expect(state.integratedTerminalShell).toBe("/bin/zsh");
     expect(state.themePresetId).toBe("github");

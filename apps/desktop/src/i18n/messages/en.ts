@@ -261,6 +261,9 @@ export const en = {
   "settings.notifications.failures.description": "Notify when a background session fails.",
   "settings.notifications.attention.title": "Needs input or approval",
   "settings.notifications.attention.description": "Notify when input is needed to continue.",
+  "settings.notifications.replyPreview.title": "Show reply preview",
+  "settings.notifications.replyPreview.description":
+    "Show the start of the agent's reply in finished and failed notifications.",
   "settings.shortcuts.groupApp": "App",
   "settings.shortcuts.groupThreads": "Threads",
   "settings.shortcuts.groupComposer": "Composer",

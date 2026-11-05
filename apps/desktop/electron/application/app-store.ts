@@ -937,6 +937,11 @@ export class DesktopAppStore {
     };
   }
 
+  /** A session's cached timeline. Session event listeners see it with their event applied. */
+  getSessionTranscript(sessionRef: SessionRef): readonly TranscriptMessage[] {
+    return this.sessionState.transcriptCache.get(sessionKey(sessionRef)) ?? [];
+  }
+
   /* ── Workspace methods (delegated) ─────────────────────── */
 
   async addWorkspace(path: string): Promise<DesktopAppState> {

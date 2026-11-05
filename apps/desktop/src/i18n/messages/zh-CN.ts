@@ -226,6 +226,8 @@ export const zhCN: Partial<Messages> = {
   "settings.notifications.failures.description": "后台会话失败时通知。",
   "settings.notifications.attention.title": "需要输入或确认",
   "settings.notifications.attention.description": "需要输入才能继续时通知。",
+  "settings.notifications.replyPreview.title": "显示回复预览",
+  "settings.notifications.replyPreview.description": "在完成和失败通知中显示代理回复的开头。",
   "settings.shortcuts.groupApp": "应用",
   "settings.shortcuts.groupThreads": "会话",
   "settings.shortcuts.groupComposer": "输入框",

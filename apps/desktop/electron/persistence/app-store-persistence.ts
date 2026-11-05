@@ -291,10 +291,15 @@ function validateUiState(value: unknown): Record<string, unknown> {
       objectRecord(root.notificationPreferences) ?? fail("notificationPreferences");
     knownKeys(
       preferences,
-      ["backgroundCompletion", "backgroundFailure", "attentionNeeded"],
+      ["backgroundCompletion", "backgroundFailure", "attentionNeeded", "showReplyPreview"],
       "notificationPreferences",
     );
-    for (const key of ["backgroundCompletion", "backgroundFailure", "attentionNeeded"])
+    for (const key of [
+      "backgroundCompletion",
+      "backgroundFailure",
+      "attentionNeeded",
+      "showReplyPreview",
+    ])
       optional(preferences, key, boolean, `notificationPreferences.${key}`);
   }
   if (root.appGlobalModelSettings !== undefined) {
@@ -806,6 +811,9 @@ function toNotificationPreferences(value: unknown): Partial<NotificationPreferen
       : {}),
     ...(typeof candidate.attentionNeeded === "boolean"
       ? { attentionNeeded: candidate.attentionNeeded }
+      : {}),
+    ...(typeof candidate.showReplyPreview === "boolean"
+      ? { showReplyPreview: candidate.showReplyPreview }
       : {}),
   };
   return Object.keys(preferences).length > 0 ? preferences : undefined;
