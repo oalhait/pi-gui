@@ -333,11 +333,21 @@ async function inspectImage(harness: DesktopHarness, result: CaptureResult) {
     const { width, height } = decoded.getSize();
     const bitmap = decoded.toBitmap();
     let magenta = 0;
+    let green = 0;
     for (let index = 0; index < bitmap.length; index += 4) {
       // BGRA: the test page paints rgb(255, 0, 255).
       if (bitmap[index] > 200 && bitmap[index + 1] < 60 && bitmap[index + 2] > 200) magenta += 1;
+      // A green test image, rgb(0, 200, 0).
+      if (bitmap[index] < 60 && bitmap[index + 1] > 150 && bitmap[index + 2] < 60) green += 1;
     }
-    return { width, height, mimeType: input.mimeType, magenta: magenta / (width * height) };
+    const pixels = width * height;
+    return {
+      width,
+      height,
+      mimeType: input.mimeType,
+      magenta: magenta / pixels,
+      green: green / pixels,
+    };
   }, image);
 }
 
@@ -474,6 +484,70 @@ test("capture returns the browser page itself, read-only, and explains hidden or
     // Only this chat's pane.
     await createNamedThread(window, "Capture Bravo");
     expect((await capture(harness, target)).details.error).toContain("Open this chat");
+  } finally {
+    await harness.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("capture right after closing and reopening a file tab shows that file, not the previous browser page", async () => {
+  const server = createServer((_req, res) =>
+    res.end("<title>Magenta page</title><body style='margin:0;background:rgb(255,0,255)'></body>"),
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address();
+  if (!port || typeof port === "string") throw new Error("Missing test port");
+  const workspace = await makeWorkspace("agent-capture-reopen");
+  // A solid green image: the file pane's own pixels are easy to tell from the browser page.
+  await writeFile(
+    join(workspace, "green.svg"),
+    "<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1600'><rect width='1600' height='1600' fill='rgb(0,200,0)'/></svg>",
+  );
+  const harness = await launchDesktop(await makeUserDataDir(), {
+    initialWorkspaces: [workspace],
+    testMode: "background",
+  });
+  try {
+    const window = await harness.firstWindow();
+    await createNamedThread(window, "Capture reopen");
+    const snapshot = await getDesktopState(window);
+    const target = {
+      workspaceId: snapshot.selectedWorkspaceId,
+      sessionId: snapshot.selectedSessionId,
+    };
+    const opened = await run(harness, target, {
+      action: "open",
+      tool: "browser",
+      url: `http://127.0.0.1:${port.port}/`,
+    });
+    const pageId = opened.selectedTabId!;
+    await expect
+      .poll(async () => (await inspectImage(harness, await capture(harness, target)))?.magenta)
+      .toBeGreaterThan(0.85);
+    // Like a window in the background: throttled, so its frames lag behind its DOM. Before the
+    // fix this capture returned the frame from before the file tab was selected.
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      const appWindow = BrowserWindow.getAllWindows()[0]!;
+      appWindow.webContents.setBackgroundThrottling(true);
+      appWindow.hide();
+    });
+    for (let round = 0; round < 3; round += 1) {
+      await run(harness, target, { action: "open", tool: "files", path: "green.svg" });
+      await run(harness, target, { action: "close", tab_id: "file:green.svg" });
+      expect((await run(harness, target, { action: "list" })).selectedTabId).toBe(pageId);
+      const reopened = await run(harness, target, {
+        action: "open",
+        tool: "files",
+        path: "green.svg",
+      });
+      expect(reopened.selectedTabId).toBe("file:green.svg");
+      // No tab_id, immediately: the selected file tab as rendered, not a stale frame.
+      const shot = await capture(harness, target);
+      expect(shot.details).toMatchObject({ tab_id: "file:green.svg", kind: "files" });
+      const pixels = await inspectImage(harness, shot);
+      expect(pixels?.magenta ?? 1).toBeLessThan(0.05);
+      expect(pixels?.green ?? 0).toBeGreaterThan(0.2);
+    }
   } finally {
     await harness.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));

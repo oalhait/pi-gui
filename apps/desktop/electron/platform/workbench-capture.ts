@@ -137,10 +137,17 @@ export function createWorkbenchCapturer(browser: () => BrowserOwner): WorkbenchC
         width: Math.min(Math.round(capture.rect.width * zoom), content.width - x),
         height: Math.min(Math.round(capture.rect.height * zoom), content.height - y),
       };
-      if (rect.width > 0 && rect.height > 0)
-        image = encodeCaptureImage(
-          await window.webContents.capturePage(rect, { stayHidden: true }),
-        );
+      if (rect.width > 0 && rect.height > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        // A window that paints no frames would otherwise never answer.
+        const captured = await Promise.race([
+          window.webContents.capturePage(rect, { stayHidden: true }),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), 5_000);
+          }),
+        ]).finally(() => clearTimeout(timer));
+        image = captured ? encodeCaptureImage(captured) : undefined;
+      }
       if (!image) note = "The side pane has not rendered any content yet.";
     }
     return {
