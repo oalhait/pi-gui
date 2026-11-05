@@ -52,7 +52,10 @@ export function updateSessionRecord(
   session: SessionRecord,
   options: {
     readonly snapshot?: Partial<
-      Pick<SessionSnapshot, "title" | "updatedAt" | "archivedAt" | "preview" | "status" | "config">
+      Pick<
+        SessionSnapshot,
+        "title" | "updatedAt" | "archivedAt" | "preview" | "status" | "config" | "connectionRetry"
+      >
     >;
     readonly status?: SessionRecord["status"];
     readonly transcript: readonly TranscriptMessage[];
@@ -78,6 +81,13 @@ export function updateSessionRecord(
     preview: options.preview ?? options.snapshot?.preview ?? session.preview,
     status: nextStatus,
     runningSince: options.runningSince,
+    // Every full snapshot carries status, and the retry when there is one.
+    connectionRetry:
+      nextStatus !== "running"
+        ? undefined
+        : options.snapshot?.status !== undefined
+          ? options.snapshot.connectionRetry
+          : session.connectionRetry,
     hasUnseenUpdate: hasUnseenSessionUpdate(
       nextStatus,
       updatedAt,

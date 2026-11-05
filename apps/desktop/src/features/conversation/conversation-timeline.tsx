@@ -58,6 +58,8 @@ interface ConversationTimelineProps {
   readonly workspacePath?: string;
   readonly annotations?: TranscriptAnnotations;
   readonly platform: NodeJS.Platform;
+  /** Stops the run; Cancel on a lost-connection line uses it. */
+  readonly onStopRun?: () => void;
 }
 const NO_MARKERS: readonly AnnotationMarker[] = [];
 export function ConversationTimeline({
@@ -79,6 +81,7 @@ export function ConversationTimeline({
   workspacePath,
   annotations,
   platform,
+  onStopRun,
 }: ConversationTimelineProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const annotationSelection = useAnnotationSelection({
@@ -216,6 +219,7 @@ export function ConversationTimeline({
                       NO_MARKERS
                     }
                     onOpenAnnotation={annotationSelection.openAnnotation}
+                    onStopRun={onStopRun}
                     scheduledOrigin={
                       item.kind === "message" ? scheduledOrigins?.get(item.id) : undefined
                     }
@@ -334,6 +338,7 @@ interface MeasuredTimelineItemProps {
   readonly workspacePath?: string;
   readonly annotationMarkers: readonly AnnotationMarker[];
   readonly onOpenAnnotation: OpenAnnotation;
+  readonly onStopRun?: (() => void) | undefined;
 }
 
 function MeasuredTimelineItemBase({
@@ -358,6 +363,7 @@ function MeasuredTimelineItemBase({
   workspacePath,
   annotationMarkers,
   onOpenAnnotation,
+  onStopRun,
 }: MeasuredTimelineItemProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
 
@@ -409,6 +415,7 @@ function MeasuredTimelineItemBase({
           workspacePath={workspacePath}
           annotationMarkers={annotationMarkers}
           onOpenAnnotation={onOpenAnnotation}
+          onStopRun={onStopRun}
         />
       </div>
     </div>
@@ -463,8 +470,12 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
     return a.durationMs === b.durationMs;
   }
   if (a.kind === "working" && b.kind === "working") {
-    // The line ticks its own elapsed time, so only a new run start redraws it.
-    return a.startedAt === b.startedAt;
+    // The line ticks its own elapsed time, so only a new run start or retry redraws it.
+    return (
+      a.startedAt === b.startedAt &&
+      a.connectionRetry?.attempt === b.connectionRetry?.attempt &&
+      a.connectionRetry?.retryAt === b.connectionRetry?.retryAt
+    );
   }
   if (a.kind === "turn-changes" && b.kind === "turn-changes") {
     // A card's id is its checkpoint, and a captured turn's files never change.
@@ -505,6 +516,7 @@ function areMeasuredTimelineItemPropsEqual(
     prev.workspacePath === next.workspacePath &&
     prev.annotationMarkers === next.annotationMarkers &&
     prev.onOpenAnnotation === next.onOpenAnnotation &&
+    prev.onStopRun === next.onStopRun &&
     prev.scheduledOrigin?.taskId === next.scheduledOrigin?.taskId
   );
 }

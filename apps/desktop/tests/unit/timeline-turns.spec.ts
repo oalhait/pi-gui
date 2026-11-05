@@ -156,3 +156,18 @@ test("the working line follows the running turn's newest row and carries the run
   expect(grown.map((item) => item.id)).toEqual(["u1", "a1", "t1", "t2", "working-indicator"]);
   expect(ids(transcript)).not.toContain("working-indicator");
 });
+
+test("a run waiting out a lost connection carries the retry on its working line", () => {
+  const retry = { attempt: 1, retryAt: at(30), error: "Request timed out." };
+  const items = buildDisplayTimelineItems([message("u1", "user", 0)], {
+    lastTurnRunning: true,
+    runningSince: at(0),
+    connectionRetry: retry,
+  });
+  expect(items.at(-1)).toEqual({
+    kind: "working",
+    id: "working-indicator",
+    startedAt: at(0),
+    connectionRetry: retry,
+  });
+});

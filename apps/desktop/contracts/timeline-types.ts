@@ -1,4 +1,5 @@
 import type {
+  SessionConnectionRetry,
   SessionTranscriptCard,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
@@ -99,6 +100,8 @@ export interface TimelineWorkingIndicator {
   readonly kind: "working";
   readonly id: "working-indicator";
   readonly startedAt?: string;
+  /** The run lost its provider connection: the line says so and offers Cancel. */
+  readonly connectionRetry?: SessionConnectionRetry;
 }
 
 export type DisplayTimelineItem =

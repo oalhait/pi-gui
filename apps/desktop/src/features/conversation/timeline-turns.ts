@@ -1,4 +1,5 @@
 import type { TurnChangeSummary } from "../../../contracts/review";
+import type { SessionConnectionRetry } from "@pi-gui/session-driver";
 import type {
   DisplayTimelineItem,
   TimelineTranscriptItem,
@@ -36,6 +37,8 @@ export function buildDisplayTimelineItems(
     readonly lastTurnRunning?: boolean;
     /** When the running turn started; shown as elapsed time on the "Working" line. */
     readonly runningSince?: string;
+    /** The running turn waits out a lost provider connection. */
+    readonly connectionRetry?: SessionConnectionRetry | undefined;
     readonly turnChanges?: readonly TurnChangeSummary[];
     /** The Show thinking setting is Hidden: reasoning rows are left out. */
     readonly hideThinking?: boolean;
@@ -122,7 +125,12 @@ export function buildDisplayTimelineItems(
     }
   }
   if (options.lastTurnRunning) {
-    result.push({ kind: "working", id: "working-indicator", startedAt: options.runningSince });
+    result.push({
+      kind: "working",
+      id: "working-indicator",
+      startedAt: options.runningSince,
+      ...(options.connectionRetry ? { connectionRetry: options.connectionRetry } : {}),
+    });
   }
   return result;
 }

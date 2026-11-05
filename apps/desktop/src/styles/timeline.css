@@ -615,6 +615,26 @@
   animation: working-shimmer 2s linear infinite;
 }
 
+/* A lost connection keeps the status line, with a quiet way to give up waiting. */
+.timeline-working--retry {
+  gap: 10px;
+}
+
+.timeline-working__cancel {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.timeline-working__cancel:hover,
+.timeline-working__cancel:focus-visible {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+
 @keyframes working-shimmer {
   from {
     background-position: 100% 0;

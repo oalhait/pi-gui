@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  SessionConnectionRetry,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
 } from "@pi-gui/session-driver";
@@ -61,6 +62,7 @@ export function TimelineItem({
   onOpenAnnotation,
   thinkingExpanded = false,
   onToggleThinking,
+  onStopRun,
 }: {
   readonly item: DisplayTimelineItem;
   readonly expandedToolCallIds?: ReadonlySet<string>;
@@ -79,12 +81,14 @@ export function TimelineItem({
   readonly onExtensionAction?: RunExtensionAction;
   readonly annotationMarkers?: readonly AnnotationMarker[];
   readonly onOpenAnnotation?: OpenAnnotation;
+  /** Stops the run; Cancel on a lost-connection line uses it. */
+  readonly onStopRun?: (() => void) | undefined;
 }) {
   switch (item.kind) {
     case "turn-marker":
       return <TimelineTurnMarkerItem item={item} />;
     case "working":
-      return <TimelineWorkingItem item={item} />;
+      return <TimelineWorkingItem item={item} onStopRun={onStopRun} />;
     case "turn-changes":
       return <TurnChangesCard turn={item.turn} onOpen={onOpenTurnChange} />;
     case "message":
@@ -562,11 +566,61 @@ function TimelineTurnMarkerItem({ item }: { readonly item: TimelineTurnMarker })
   );
 }
 
-function TimelineWorkingItem({ item }: { readonly item: TimelineWorkingIndicator }) {
+function TimelineWorkingItem({
+  item,
+  onStopRun,
+}: {
+  readonly item: TimelineWorkingIndicator;
+  readonly onStopRun?: (() => void) | undefined;
+}) {
   const label = useRunningLabel(item.startedAt);
+  if (item.connectionRetry) {
+    return <ConnectionRetryLine retry={item.connectionRetry} onCancel={onStopRun} />;
+  }
   return (
     <div className="timeline-working" data-testid="timeline-working">
       <span className="timeline-working__label">{label}</span>
+    </div>
+  );
+}
+
+/** "Connection lost. Retrying in 12s", then "Reconnecting…" while the resumed attempt runs. */
+function ConnectionRetryLine({
+  retry,
+  onCancel,
+}: {
+  readonly retry: SessionConnectionRetry;
+  readonly onCancel?: (() => void) | undefined;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!retry.retryAt) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [retry.retryAt]);
+  const seconds = retry.retryAt ? Math.ceil((Date.parse(retry.retryAt) - now) / 1000) : 0;
+  const status = !retry.retryAt
+    ? "Reconnecting…"
+    : seconds > 0
+      ? `Retrying in ${seconds}s`
+      : "Retrying…";
+  return (
+    <div
+      className="timeline-working timeline-working--retry"
+      data-testid="timeline-connection-retry"
+      title={retry.error}
+    >
+      <span className="timeline-working__label">{`Connection lost. ${status}`}</span>
+      {onCancel ? (
+        <button
+          type="button"
+          className="timeline-working__cancel"
+          data-testid="connection-retry-cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -188,6 +188,7 @@ export interface DesktopAppStoreOptions {
   readonly driverOptions?: Pick<
     PiSdkDriverConfig,
     | "builtinExtensions"
+    | "connectionResume"
     | "desktopExtensions"
     | "onTurnCaptureBoundary"
     | "openUrl"

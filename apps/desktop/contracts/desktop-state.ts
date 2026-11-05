@@ -2,6 +2,7 @@ import type {
   ExtensionFlagValues,
   HostUiRequest,
   SessionConfig,
+  SessionConnectionRetry,
   SessionUsageSnapshot,
 } from "@pi-gui/session-driver";
 import type {
@@ -111,6 +112,8 @@ export interface SessionRecord {
   readonly preview: string;
   readonly status: SessionStatus;
   readonly runningSince?: string;
+  /** The running run lost its provider connection and waits to resume. */
+  readonly connectionRetry?: SessionConnectionRetry | undefined;
   readonly hasUnseenUpdate: boolean;
   readonly config?: SessionConfig;
 }
