@@ -373,6 +373,17 @@ export function useSessionComposer(params: UseSessionComposerParams) {
       selectedSession?.status === "running"
     ) {
       event.preventDefault();
+      const hasComposerInput =
+        composerDraft.trim().length > 0 ||
+        composerAttachments.length > 0 ||
+        annotations.list.length > 0;
+      const queued = snapshot?.queuedComposerMessages ?? [];
+      if (!hasComposerInput && queued.length > 0) {
+        // An empty Enter with messages waiting steers the next one in; it never stops the run.
+        const next = queued.find((message) => message.mode !== "steer");
+        if (next) handleSteerQueuedMessage(next.id);
+        return;
+      }
       submitComposerDraft({ deliverAs: event.metaKey || event.ctrlKey ? "steer" : "followUp" });
       return;
     }
