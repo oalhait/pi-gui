@@ -328,6 +328,77 @@ test("delineates queued follow-ups and submitted steers in the timeline", async 
   }
 });
 
+test("Enter in an empty composer steers the next queued message instead of stopping the run", async () => {
+  test.setTimeout(60_000);
+  const userDataDir = await makeUserDataDir();
+  const agentDir = join(userDataDir, "agent");
+  const workspacePath = await makeWorkspace("queued-messages-enter-steers");
+  const called = join(userDataDir, "model-called");
+  await seedAgentDir(agentDir, { withOpenAiAuth: false, withDefaultModel: false });
+  await writeFile(
+    join(agentDir, "settings.json"),
+    JSON.stringify({
+      defaultProvider: OPEN_REPLY_PROVIDER,
+      defaultModel: "open",
+      enabledModels: [`${OPEN_REPLY_PROVIDER}/open`],
+      packages: [],
+      cacheWarming: "off",
+      compaction: { enabled: false },
+    }),
+  );
+  await writeProjectExtension(workspacePath, "open-reply.ts", openReplyProvider(called));
+  const harness = await launchDesktop(userDataDir, {
+    agentDir,
+    initialWorkspaces: [workspacePath],
+    scrubProviderEnv: true,
+    testMode: "background",
+  });
+
+  try {
+    const window = await harness.firstWindow();
+    await waitForWorkspaceByPath(window, workspacePath);
+    await window
+      .getByRole("complementary")
+      .getByRole("button", { name: "New thread", exact: true })
+      .click();
+    await window.getByLabel("New thread prompt", { exact: true }).fill("Start a long reply");
+    await window.getByRole("button", { name: "Start thread", exact: true }).click();
+    await expect.poll(() => existsSync(called)).toBe(true);
+
+    const queued: SessionQueuedMessage = {
+      id: "queued-enter-steer-1",
+      mode: "followUp",
+      text: "Steer me in with Enter",
+      createdAt: new Date(Date.now() - 5_000).toISOString(),
+      updatedAt: new Date(Date.now() - 5_000).toISOString(),
+    };
+    await emitRunningSnapshot(harness, window, [queued]);
+    const queuedRow = window
+      .getByTestId("queued-composer-message")
+      .filter({ hasText: queued.text });
+    await expect(queuedRow).toHaveCount(1);
+
+    const composer = window.getByTestId("composer");
+    await composer.fill("");
+    await composer.press("Enter");
+    await expect(queuedRow).toHaveCount(0);
+    await expect(window.getByTestId("transcript")).toContainText(queued.text);
+    const runningStatus = async () => {
+      const state = await getDesktopState(window);
+      return state.workspaces
+        .flatMap((workspace) => workspace.sessions)
+        .find((session) => session.id === state.selectedSessionId)?.status;
+    };
+    await expect.poll(runningStatus).toBe("running");
+
+    // With nothing queued, Enter in an empty composer still stops the run.
+    await composer.press("Enter");
+    await expect.poll(runningStatus).not.toBe("running");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("queued edit and cancel keep their original session when navigation is already queued", async () => {
   test.setTimeout(60_000);
   const userDataDir = await makeUserDataDir();
