@@ -386,6 +386,21 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
+  packages/pi-gui-host:
+    dependencies:
+      '@pi-gui/catalogs':
+        specifier: workspace:*
+        version: link:../catalogs
+      '@pi-gui/pi-sdk-driver':
+        specifier: workspace:*
+        version: link:../pi-sdk-driver
+      '@pi-gui/remote-protocol':
+        specifier: workspace:*
+        version: link:../remote-protocol
+      '@pi-gui/session-driver':
+        specifier: workspace:*
+        version: link:../session-driver
+
   packages/pi-sdk-driver:
     dependencies:
       '@earendil-works/pi-coding-agent':
