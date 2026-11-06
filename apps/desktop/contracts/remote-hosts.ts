@@ -78,3 +78,14 @@ export function parseRemoteWorkspaceId(
 export function remoteHostIdOf(workspaceId: string | undefined): string | undefined {
   return workspaceId === undefined ? undefined : parseRemoteWorkspaceId(workspaceId)?.hostId;
 }
+
+/** What "Test connection" found, without installing or starting anything. */
+export type RemoteHostTestResult =
+  | {
+      readonly ok: true;
+      readonly home: string;
+      readonly nodeVersion: string;
+      /** pi-gui-host is already installed (pi-gui installs or updates it when connecting). */
+      readonly installed: boolean;
+    }
+  | { readonly ok: false; readonly message: string };
