@@ -1,0 +1,30 @@
+{
+  "name": "@pi-gui/remote-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Wire protocol between pi-gui and a pi-gui-host server.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test \"test/**/*.test.mts\""
+  },
+  "dependencies": {
+    "@pi-gui/pi-sdk-driver": "workspace:*",
+    "@pi-gui/session-driver": "workspace:*"
+  }
+}
