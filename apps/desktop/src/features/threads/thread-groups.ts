@@ -60,6 +60,8 @@ export interface RecencyThreadSection {
 export interface ThreadSidebarModel {
   readonly folders: readonly WorkspaceRecord[];
   readonly workspaceGroups: readonly WorkspaceThreadGroup[];
+  /** Top-level chats outside any project, when any exist. Folder grouping lists them first. */
+  readonly chatsGroup?: WorkspaceThreadGroup;
   readonly pinnedThreads: readonly ThreadListEntry[];
   readonly recencySections: readonly RecencyThreadSection[];
   readonly archivedThreads: readonly ThreadListEntry[];
@@ -98,12 +100,22 @@ export function buildThreadSidebarModel(
   }
 
   const folders = listFolders(state);
+  const chats = state.workspaces.find((workspace) => workspace.kind === "chats");
+  const hasChats = chats ? entries.some((entry) => entry.folderId === chats.id) : false;
   return {
     folders,
     workspaceGroups: folders.map((workspace) => ({
       workspace,
       threads: historyThreads.filter((entry) => entry.folderId === workspace.id),
     })),
+    ...(chats && hasChats
+      ? {
+          chatsGroup: {
+            workspace: chats,
+            threads: historyThreads.filter((entry) => entry.folderId === chats.id),
+          },
+        }
+      : {}),
     pinnedThreads,
     recencySections: RECENCY_BUCKET_ORDER.flatMap((bucket) => {
       const threads = historyByBucket.get(bucket);
@@ -213,8 +225,18 @@ function collectThreadEntries(state: DesktopAppState): ThreadListEntry[] {
   const workspacesById = new Map(
     state.workspaces.map((workspace) => [workspace.id, workspace] as const),
   );
+  const chats = state.workspaces.find((workspace) => workspace.kind === "chats");
+  const chatEntries: ThreadListEntry[] = chats
+    ? chats.sessions.map((session) => ({
+        folderId: chats.id,
+        workspaceId: chats.id,
+        session,
+        environment: { kind: "local" as const, label: "Local" },
+        contextLabel: chats.name,
+      }))
+    : [];
   const folders = listFolders(state);
-  return folders.flatMap((folder) => {
+  const folderEntries = folders.flatMap((folder): ThreadListEntry[] => {
     if (folder.kind !== "primary") {
       return folder.sessions.map((session) => ({
         folderId: folder.id,
@@ -273,6 +295,7 @@ function collectThreadEntries(state: DesktopAppState): ThreadListEntry[] {
       ),
     ];
   });
+  return [...chatEntries, ...folderEntries];
 }
 
 export function sessionThreadKey(thread: ThreadListEntry): string {
@@ -306,7 +329,10 @@ export function visibleThreadShortcutOrder(
   const collapsedWorkspaceIds = new Set(options.collapsedWorkspaceIds ?? []);
   const unpinned =
     options.grouping === "workspace"
-      ? options.model.workspaceGroups
+      ? [
+          ...(options.model.chatsGroup ? [options.model.chatsGroup] : []),
+          ...options.model.workspaceGroups,
+        ]
           .filter((group) => !collapsedWorkspaceIds.has(group.workspace.id))
           .flatMap(
             (group) =>

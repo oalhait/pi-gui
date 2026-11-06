@@ -38,6 +38,7 @@ import type {
 } from "../../../contracts/desktop-state";
 import {
   ArchiveIcon,
+  ChatIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -191,6 +192,8 @@ export function Sidebar(props: SidebarProps) {
       },
     );
   };
+  const chatsGroup = threadSidebarModel.chatsGroup;
+  const chatsGroups = chatsGroup ? [chatsGroup] : [];
   const shortcutOrder = visibleThreadShortcutOrder({
     grouping: threadGrouping,
     model: threadSidebarModel,
@@ -233,7 +236,7 @@ export function Sidebar(props: SidebarProps) {
       ...threadSidebarModel.recencySections
         .filter((section) => holds(section.threads))
         .map((section) => recencyHistoryExpansionKey(section.bucket)),
-      ...threadSidebarModel.workspaceGroups
+      ...[...chatsGroups, ...threadSidebarModel.workspaceGroups]
         .filter((group) => holds(group.threads))
         .map((group) => workspaceHistoryExpansionKey(group.workspace.id)),
     ];
@@ -242,7 +245,9 @@ export function Sidebar(props: SidebarProps) {
     );
     // A folded folder hides the rename field; open it so the input is reachable.
     // Time grouping shows no folder threads, so leave the folded set alone there.
-    for (const group of threadGrouping === "workspace" ? threadSidebarModel.workspaceGroups : []) {
+    for (const group of threadGrouping === "workspace"
+      ? [...chatsGroups, ...threadSidebarModel.workspaceGroups]
+      : []) {
       if (holds(group.threads) && collapsedFolderIds.has(group.workspace.id)) {
         setFolderCollapsed(group.workspace.id, false);
       }
@@ -550,10 +555,12 @@ export function Sidebar(props: SidebarProps) {
           </div>
         </div>
 
-        {visibleWorkspaces.length === 0 ? (
+        {visibleWorkspaces.length === 0 &&
+        threadSidebarModel.recencyOrder.length === 0 &&
+        threadSidebarModel.archivedThreads.length === 0 ? (
           <div className="empty-state" data-testid="empty-state">
             <h2>No folders yet</h2>
-            <p>Open a project folder to start building a workspace and session list.</p>
+            <p>Start a chat with New thread, or open a project folder to work in it.</p>
             <button
               className="button button--primary"
               type="button"
@@ -592,6 +599,31 @@ export function Sidebar(props: SidebarProps) {
                     selectedWorkspace={selectedWorkspace}
                     selectedSession={selectedSession}
                     threadMenu={threadMenu}
+                    onArchiveSession={onArchiveSession}
+                    onSelectSession={onSelectSession}
+                    onSetSessionPinned={onSetSessionPinned}
+                  />
+                ) : null}
+                {threadGrouping === "workspace" && chatsGroup ? (
+                  <ChatsGroupView
+                    group={chatsGroup}
+                    historyExpanded={expandedHistory.has(
+                      workspaceHistoryExpansionKey(chatsGroup.workspace.id),
+                    )}
+                    onToggleHistory={() =>
+                      toggleHistoryExpanded(workspaceHistoryExpansionKey(chatsGroup.workspace.id))
+                    }
+                    collapsed={collapsedFolderIds.has(chatsGroup.workspace.id)}
+                    onToggleCollapsed={() =>
+                      setFolderCollapsed(
+                        chatsGroup.workspace.id,
+                        !collapsedFolderIds.has(chatsGroup.workspace.id),
+                      )
+                    }
+                    selectedWorkspace={selectedWorkspace}
+                    selectedSession={selectedSession}
+                    threadMenu={threadMenu}
+                    onNewThread={onNewThread}
                     onArchiveSession={onArchiveSession}
                     onSelectSession={onSelectSession}
                     onSetSessionPinned={onSetSessionPinned}
@@ -1027,6 +1059,113 @@ function WorkspaceFolderContent(
         </>
       ) : null}
     </>
+  );
+}
+
+/** Top-level chats in folder grouping: like a folder, without folder actions or reordering. */
+function ChatsGroupView({
+  group,
+  historyExpanded,
+  onToggleHistory,
+  collapsed,
+  onToggleCollapsed,
+  selectedWorkspace,
+  selectedSession,
+  threadMenu,
+  onNewThread,
+  onArchiveSession,
+  onSelectSession,
+  onSetSessionPinned,
+}: {
+  readonly group: WorkspaceThreadGroup;
+  readonly historyExpanded: boolean;
+  readonly onToggleHistory: () => void;
+  readonly collapsed: boolean;
+  readonly onToggleCollapsed: () => void;
+  readonly selectedWorkspace: WorkspaceRecord | undefined;
+  readonly selectedSession: SessionRecord | undefined;
+  readonly threadMenu: ThreadMenuState;
+  readonly onNewThread: (workspaceId?: string) => void;
+  readonly onArchiveSession: (target: { workspaceId: string; sessionId: string }) => void;
+  readonly onSelectSession: (target: { workspaceId: string; sessionId: string }) => void;
+  readonly onSetSessionPinned: (
+    target: { workspaceId: string; sessionId: string },
+    pinned: boolean,
+  ) => void;
+}) {
+  const { workspace, threads } = group;
+  const history = collapsed ? undefined : threadHistoryPreview(threads, historyExpanded);
+  const collapsible = threads.length > 0;
+  return (
+    <section className="workspace-group" data-workspace-id={workspace.id} data-chats-group="true">
+      <div
+        className={`workspace-row ${workspace.id === selectedWorkspace?.id ? "workspace-row--active" : ""}`}
+      >
+        <button
+          className="workspace-row__select"
+          type="button"
+          aria-expanded={collapsible ? !collapsed : undefined}
+          onClick={() => {
+            if (collapsible) onToggleCollapsed();
+          }}
+        >
+          <span
+            className="workspace-row__icon"
+            aria-hidden="true"
+            data-state={collapsible ? (collapsed ? "collapsed" : "expanded") : undefined}
+          >
+            <span className="workspace-row__icon-folder">
+              <ChatIcon />
+            </span>
+            {collapsible ? (
+              <span className="workspace-row__icon-chevron">
+                {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
+              </span>
+            ) : null}
+          </span>
+          <span className="workspace-row__name">{workspace.name}</span>
+        </button>
+        <span className="workspace-row__actions">
+          <button
+            aria-label="New chat"
+            className="icon-button workspace-row__action-button"
+            title="New chat"
+            type="button"
+            onClick={() => {
+              if (collapsed) onToggleCollapsed();
+              onNewThread(workspace.id);
+            }}
+          >
+            <PlusIcon />
+          </button>
+        </span>
+      </div>
+      {history ? (
+        <>
+          <div className="session-list session-list--history">
+            {history.visible.map((thread) => (
+              <HistoryThreadRow
+                key={`${thread.workspaceId}:${thread.session.id}`}
+                thread={thread}
+                selectedWorkspace={selectedWorkspace}
+                selectedSession={selectedSession}
+                threadMenu={threadMenu}
+                onArchiveSession={onArchiveSession}
+                onSelectSession={onSelectSession}
+                onSetSessionPinned={onSetSessionPinned}
+              />
+            ))}
+          </div>
+          {history.overflow ? (
+            <HistoryToggle
+              expanded={historyExpanded}
+              label={workspace.name}
+              onToggle={onToggleHistory}
+            />
+          ) : null}
+        </>
+      ) : null}
+    </section>
   );
 }
 

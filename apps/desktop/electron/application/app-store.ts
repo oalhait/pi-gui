@@ -3,7 +3,7 @@ import { sessionKey } from "@pi-gui/session-driver";
 import type { ExtensionFlagValues, SessionSchemaInfo } from "@pi-gui/session-driver";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
@@ -69,6 +69,7 @@ import {
   type TranscriptMessage,
   type WorkspaceRecord,
   type WorkspaceSessionTarget,
+  CHATS_WORKSPACE_NAME,
   isThemeMode,
   isThemePresetId,
   type CreateScheduledTaskInput,
@@ -276,6 +277,10 @@ export class DesktopAppStore {
     PendingRuntimeCommandExecution
   >();
   private readonly reportedCompatibilityIssuesBySession = new Map<string, Set<string>>();
+  /** pi-gui's own folder for chats that belong to no project. Pi needs a working directory. */
+  private readonly chatsDir: string;
+  /** The chats folder's workspace id (its canonical path), once startup has created it. */
+  private chatsWorkspaceId = "";
   private readonly initialWorkspacePaths: readonly string[];
   private readonly getWindow: () => BrowserWindow | null;
   private readonly shouldKeepSessionDialogs: (sessionRef: SessionRef) => boolean;
@@ -325,6 +330,7 @@ export class DesktopAppStore {
     this.uiStateFilePath = join(options.userDataDir, "ui-state.json");
     this.scheduledTasksFilePath = join(options.userDataDir, "scheduled-tasks.json");
     this.attachmentStore = new AttachmentStore(options.userDataDir);
+    this.chatsDir = join(options.userDataDir, "chats");
     this.initialWorkspacePaths = options.initialWorkspacePaths;
     this.getWindow = options.getWindow ?? (() => null);
     this.shouldKeepSessionDialogs = options.shouldKeepSessionDialogs ?? (() => false);
@@ -2320,14 +2326,22 @@ export class DesktopAppStore {
         workspacesToSync.set(ws.path, ws.displayName);
       }
 
+      const chatsDiagnostic = await this.prepareChatsWorkspace();
+      workspacesToSync.delete(this.chatsWorkspaceId);
       const syncDiagnostics = await Promise.all(
         [...workspacesToSync.entries()].map(([workspacePath, displayName]) =>
           this.syncStartupWorkspace(workspacePath, displayName),
         ),
       );
+      // After the folders, so a first launch gives them the earlier sort order.
+      if (this.chatsWorkspaceId) {
+        syncDiagnostics.push(
+          await this.syncStartupWorkspace(this.chatsWorkspaceId, CHATS_WORKSPACE_NAME),
+        );
+      }
       startupDiagnostics.push(
-        ...syncDiagnostics.filter((diagnostic): diagnostic is StartupDiagnostic =>
-          Boolean(diagnostic),
+        ...[chatsDiagnostic, ...syncDiagnostics].filter(
+          (diagnostic): diagnostic is StartupDiagnostic => Boolean(diagnostic),
         ),
       );
 
@@ -2451,6 +2465,19 @@ export class DesktopAppStore {
     }
   }
 
+  /** Creates the chats folder and records its workspace id; chats stay unavailable on failure. */
+  private async prepareChatsWorkspace(): Promise<StartupDiagnostic | undefined> {
+    try {
+      await mkdir(this.chatsDir, { recursive: true });
+      this.chatsWorkspaceId = await realpath(this.chatsDir);
+      return undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[app-store] chats folder unavailable: ${this.chatsDir}: ${message}`);
+      return { scope: "workspace", workspacePath: this.chatsDir, message };
+    }
+  }
+
   private async syncStartupWorkspace(
     workspacePath: string,
     displayName: string | undefined,
@@ -2551,6 +2578,7 @@ export class DesktopAppStore {
       const selectedWorkspaceId = resolveSelectedWorkspaceIdFromCatalog(
         options.selectedWorkspaceId ?? this.state.selectedWorkspaceId,
         workspacesSnapshot.workspaces,
+        this.chatsWorkspaceId,
       );
       const selectedSessionId = resolveSelectedSessionIdFromCatalog(
         selectedWorkspaceId,
@@ -2577,6 +2605,7 @@ export class DesktopAppStore {
         this.sessionState.lastViewedAtBySession,
         this.sessionState.lastInteractedAtBySession,
         this.sessionState.pinnedAtBySession,
+        this.chatsWorkspaceId,
       );
       const worktreesByWorkspace = buildWorktreeRecords(
         workspacesSnapshot.workspaces,
@@ -5228,11 +5257,17 @@ function formatCapabilityLabel(capability: string): string {
 function resolveSelectedWorkspaceIdFromCatalog(
   preferredWorkspaceId: string,
   workspaces: readonly { workspaceId: string }[],
+  chatsWorkspaceId: string,
 ): string {
   if (preferredWorkspaceId && workspaces.some((w) => w.workspaceId === preferredWorkspaceId)) {
     return preferredWorkspaceId;
   }
-  return workspaces[0]?.workspaceId ?? "";
+  // Without a saved choice, a project folder comes before the chats folder.
+  return (
+    workspaces.find((w) => w.workspaceId !== chatsWorkspaceId)?.workspaceId ??
+    workspaces[0]?.workspaceId ??
+    ""
+  );
 }
 
 function resolveSelectedSessionIdFromCatalog(

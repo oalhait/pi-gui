@@ -1023,7 +1023,8 @@ export default function App() {
           panelAvailable={sidePanelAvailable}
           panelVisible={sidePanelVisible}
           editorControl={
-            selectedWorkspace ? (
+            // Chats live in pi-gui's own folder, not one the user works in.
+            selectedWorkspace && selectedWorkspace.kind !== "chats" ? (
               <OpenInEditorButton state={openInEditor} onOpenFolder={openSelectedWorkspaceFolder} />
             ) : undefined
           }
@@ -1073,8 +1074,11 @@ export default function App() {
           ) : snapshot.activeView === "new-thread" ? (
             rootWorkspaceOptions.length > 0 ? (
               <NewThreadView
-                workspaces={rootWorkspaceOptions}
-                selectedWorkspaceId={newThread.rootWorkspaceId || rootWorkspaceOptions[0]?.id || ""}
+                workspace={newThread.workspace}
+                folders={rootWorkspaceOptions.filter((workspace) => workspace.kind !== "chats")}
+                chatsWorkspaceId={
+                  rootWorkspaceOptions.find((workspace) => workspace.kind === "chats")?.id
+                }
                 runtime={newThread.runtime}
                 environment={newThread.environment}
                 prompt={newThread.prompt}
@@ -1195,6 +1199,7 @@ export default function App() {
               ) : null}
               <ComposerPanel
                 key={selectedSessionKey}
+                topLevelChat={selectedWorkspace.kind === "chats"}
                 preparingTaskDraft={extensionHostActions.preparingTaskDraft}
                 activeSlashCommand={slashMenu.activeSlashFlow?.command}
                 activeSlashCommandMeta={slashMenu.activeSlashFlow?.command?.description}

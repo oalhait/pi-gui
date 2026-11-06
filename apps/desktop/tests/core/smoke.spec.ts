@@ -19,7 +19,12 @@ test("adds a workspace to an empty launched app", async () => {
 
   try {
     const window = await harness.firstWindow();
-    await expect.poll(async () => (await getDesktopState(window)).workspaces).toEqual([]);
+    // A fresh app has no project folders, only the built-in Chats location.
+    await expect
+      .poll(async () =>
+        (await getDesktopState(window)).workspaces.map((workspace) => workspace.kind),
+      )
+      .toEqual(["chats"]);
 
     await addWorkspaceViaIpc(window, workspacePath);
 

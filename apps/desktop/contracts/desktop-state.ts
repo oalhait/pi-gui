@@ -28,7 +28,12 @@ export type {
 } from "./scheduled-tasks";
 
 export type AppView = "threads" | "new-thread" | "scheduled" | "skills" | "extensions" | "settings";
-export type WorkspaceKind = "primary" | "worktree";
+/**
+ * `chats` is pi-gui's own folder for top-level chats: threads that belong to no project.
+ * There is at most one, it has no worktrees, and the sidebar shows it as Chats, not a folder.
+ */
+export type WorkspaceKind = "primary" | "worktree" | "chats";
+export const CHATS_WORKSPACE_NAME = "Chats";
 export type WorktreeStatus = "ready" | "missing" | "error";
 export type NewThreadEnvironment = "local" | "worktree";
 export type ThemeMode = "system" | "light" | "dark";

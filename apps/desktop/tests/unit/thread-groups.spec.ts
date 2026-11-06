@@ -538,3 +538,53 @@ test("malformed cycles cannot hide sessions or loop during hierarchy traversal",
   expect(new Set(visible.map(sessionThreadKey)).size).toBe(3);
   expect(visible).toHaveLength(3);
 });
+
+test("top-level chats join the recency list and get their own group, never a folder", () => {
+  const chats = workspace(
+    "chats",
+    "Chats",
+    [
+      session("chat-new", "Research question", { updatedAt: isoDaysAgo(0, 14) }),
+      session("chat-old", "Old question", { updatedAt: isoDaysAgo(3) }),
+    ],
+    { kind: "chats" },
+  );
+  const alpha = workspace("alpha", "Alpha", [
+    session("alpha-today", "Alpha thread", { updatedAt: isoDaysAgo(0, 10) }),
+  ]);
+  const model = buildThreadSidebarModel(state([alpha, chats]), nowMs);
+
+  expect(model.folders.map((folder) => folder.id)).toEqual(["alpha"]);
+  expect(model.workspaceGroups.map((group) => group.workspace.id)).toEqual(["alpha"]);
+  expect(model.chatsGroup?.threads.map((thread) => thread.session.id)).toEqual([
+    "chat-new",
+    "chat-old",
+  ]);
+  expect(model.recencyOrder.map((thread) => thread.session.id)).toEqual([
+    "chat-new",
+    "alpha-today",
+    "chat-old",
+  ]);
+  expect(model.recencyOrder[0]?.contextLabel).toBe("Chats");
+  expect(model.recencyOrder[0]?.environment.kind).toBe("local");
+
+  // Folder grouping numbers the Chats group's rows before the folders'.
+  const order = visibleThreadShortcutOrder({ grouping: "workspace", model });
+  expect(order.map((thread) => thread.session.id)).toEqual(["chat-new", "chat-old", "alpha-today"]);
+  const folded = visibleThreadShortcutOrder({
+    grouping: "workspace",
+    model,
+    collapsedWorkspaceIds: ["chats"],
+  });
+  expect(folded.map((thread) => thread.session.id)).toEqual(["alpha-today"]);
+});
+
+test("an empty Chats workspace adds no group", () => {
+  const model = buildThreadSidebarModel(
+    state([workspace("chats", "Chats", [], { kind: "chats" })]),
+    nowMs,
+  );
+  expect(model.chatsGroup).toBeUndefined();
+  expect(model.folders).toEqual([]);
+  expect(model.recencyOrder).toEqual([]);
+});

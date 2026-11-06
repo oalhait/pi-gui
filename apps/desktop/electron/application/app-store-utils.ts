@@ -11,14 +11,15 @@ import type {
   SessionQueuedMessage,
   SessionRef,
 } from "@pi-gui/session-driver";
-import type {
-  ComposerAttachment,
-  QueuedComposerMessage,
-  SessionRecord,
-  TranscriptMessage,
-  WorktreeRecord,
-  WorkspaceRecord,
-  WorkspaceSessionTarget,
+import {
+  CHATS_WORKSPACE_NAME,
+  type ComposerAttachment,
+  type QueuedComposerMessage,
+  type SessionRecord,
+  type TranscriptMessage,
+  type WorktreeRecord,
+  type WorkspaceRecord,
+  type WorkspaceSessionTarget,
 } from "../../contracts/desktop-state";
 import {
   TOOL_IMAGE_SCHEME,
@@ -126,18 +127,28 @@ export function buildWorkspaceRecords(
   lastViewedAtBySession: Map<string, string>,
   lastInteractedAtBySession: Map<string, string>,
   pinnedAtBySession: Map<string, string>,
+  chatsWorkspaceId = "",
 ): WorkspaceRecord[] {
   const workspaceRoots = resolveWorkspaceRoots(workspaces, worktrees);
+  const isChats = (workspace: WorkspaceCatalogEntry) =>
+    Boolean(chatsWorkspaceId) && workspace.workspaceId === chatsWorkspaceId;
+  // Chats goes last, so code that falls back to the first workspace picks a project folder.
+  const ordered = [
+    ...workspaces.filter((workspace) => !isChats(workspace)),
+    ...workspaces.filter(isChats),
+  ];
 
-  return workspaces.map((workspace) => {
-    const rootWorkspaceId = workspaceRoots.get(workspace.workspaceId);
+  return ordered.map((workspace) => {
+    const rootWorkspaceId = isChats(workspace)
+      ? undefined
+      : workspaceRoots.get(workspace.workspaceId);
 
     return {
       id: workspace.workspaceId,
-      name: workspace.displayName,
+      name: isChats(workspace) ? CHATS_WORKSPACE_NAME : workspace.displayName,
       path: workspace.path,
       lastOpenedAt: workspace.lastOpenedAt,
-      kind: rootWorkspaceId ? "worktree" : "primary",
+      kind: isChats(workspace) ? "chats" : rootWorkspaceId ? "worktree" : "primary",
       ...(rootWorkspaceId
         ? {
             rootWorkspaceId,

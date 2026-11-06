@@ -163,6 +163,10 @@ export function createWorkspaceOwner(store: WorkspaceOwnerHost): WorkspaceOwner 
   };
 }
 
+function isChatsWorkspace(store: WorkspaceOwnerHost, workspaceId: string): boolean {
+  return store.workspaceState().workspaces.some((w) => w.id === workspaceId && w.kind === "chats");
+}
+
 function fallbackSelectionAfterWorkspaceRemoval(
   state: WorkspaceStateView,
   removedWorkspaceId: string,
@@ -184,7 +188,8 @@ async function addWorkspace(store: WorkspaceOwnerHost, path: string): Promise<De
     return store.emit();
   }
   const state = store.workspaceState();
-  const hadNoWorkspaces = state.workspaces.length === 0;
+  // Chats is always present, so "first folder" means the first project folder.
+  const hadNoWorkspaces = state.workspaces.every((workspace) => workspace.kind === "chats");
 
   const existing = state.workspaces.find((workspace) => workspace.path === normalizedPath);
   if (existing) {
@@ -227,6 +232,9 @@ async function renameWorkspace(
   if (!nextName) {
     return store.withError("Workspace name cannot be empty.");
   }
+  if (isChatsWorkspace(store, workspaceId)) {
+    return store.withError("Chats can't be renamed.");
+  }
 
   return store.withErrorHandling(async () => {
     await store.driver.renameWorkspace(workspaceId, nextName);
@@ -244,6 +252,9 @@ async function removeWorkspace(
   workspaceId: string,
 ): Promise<DesktopAppState> {
   await store.initialize();
+  if (isChatsWorkspace(store, workspaceId)) {
+    return store.withError("Chats can't be removed. Archive the chats you no longer need.");
+  }
 
   return store.withErrorHandling(async () => {
     await store.driver.removeWorkspace(workspaceId);

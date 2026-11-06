@@ -14,6 +14,12 @@ import type { CreateWorktreeOptions } from "../platform/worktrees/worktree-manag
 import type { WorkspaceOwnerHost } from "./app-store-workspace";
 import { NEW_THREAD_PLACEHOLDER_TITLE } from "../conversation/thread-title-constants";
 
+const CHATS_WORKTREE_ERROR = "Chats don't belong to a project, so they can't use a worktree.";
+
+function isChatsWorkspace(store: WorkspaceOwnerHost, workspaceId: string): boolean {
+  return store.workspaceState().workspaces.some((w) => w.id === workspaceId && w.kind === "chats");
+}
+
 /* ── Public methods ─────────────────────────────────────── */
 
 export async function createWorktree(
@@ -24,6 +30,9 @@ export async function createWorktree(
   const rootWorkspace = store.workspaceRefFromState(input.workspaceId);
   if (!rootWorkspace) {
     return store.withError(`Unknown workspace: ${input.workspaceId}`);
+  }
+  if (isChatsWorkspace(store, input.workspaceId)) {
+    return store.withError(CHATS_WORKTREE_ERROR);
   }
 
   return store.withErrorHandling(async () => {
@@ -102,6 +111,9 @@ export async function startThread(
   const rootWorkspace = store.workspaceRefFromState(input.rootWorkspaceId);
   if (!rootWorkspace) {
     return store.withError(`Unknown workspace: ${input.rootWorkspaceId}`);
+  }
+  if (input.environment === "worktree" && isChatsWorkspace(store, input.rootWorkspaceId)) {
+    return store.withError(CHATS_WORKTREE_ERROR);
   }
 
   return store.withErrorHandling(async () => {
@@ -250,6 +262,9 @@ export async function forkThread(
       const rootWorkspace = store.workspaceRefFromState(input.rootWorkspaceId);
       if (!rootWorkspace) {
         return store.withError(`Unknown workspace: ${input.rootWorkspaceId}`);
+      }
+      if (isChatsWorkspace(store, input.rootWorkspaceId)) {
+        return store.withError(CHATS_WORKTREE_ERROR);
       }
       const worktreeOptions = buildWorktreeOptions(
         store,

@@ -333,6 +333,6 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     editError: editError?.sessionKey === selectedSessionKey ? editError.message : undefined,
     dismissEditError,
     handleForkSubmit,
-    canUseWorktree: Boolean(rootWorkspace),
+    canUseWorktree: rootWorkspace !== undefined && rootWorkspace.kind !== "chats",
   };
 }

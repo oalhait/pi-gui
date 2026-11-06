@@ -14,7 +14,7 @@ import type {
   WorkspaceRecord,
 } from "../../../contracts/desktop-state";
 import type { MentionOption } from "../conversation/hooks/use-mention-menu";
-import { ArrowUpIcon, PiLogoMark, PlusIcon } from "../../ui/icons";
+import { ArrowUpIcon, CloseIcon, PiLogoMark, PlusIcon } from "../../ui/icons";
 import {
   MODEL_OPTIONS_EMPTY_TITLE,
   type ComposerSlashCommand,
@@ -32,8 +32,12 @@ import { ModelSelector } from "../conversation/model-selector";
 import { ExtensionFlagsSelector } from "./extension-flags-selector";
 
 interface NewThreadViewProps {
-  readonly workspaces: readonly WorkspaceRecord[];
-  readonly selectedWorkspaceId: string;
+  /** Where the thread starts: a project folder, or Chats for a top-level chat. */
+  readonly workspace: WorkspaceRecord | undefined;
+  /** Project folders the user can pick. */
+  readonly folders: readonly WorkspaceRecord[];
+  /** Present when top-level chats are available; × switches to it. */
+  readonly chatsWorkspaceId: string | undefined;
   readonly runtime?: RuntimeSnapshot;
   readonly environment: NewThreadEnvironment;
   readonly prompt: string;
@@ -80,8 +84,9 @@ interface NewThreadViewProps {
 }
 
 export function NewThreadView({
-  workspaces,
-  selectedWorkspaceId,
+  workspace,
+  folders,
+  chatsWorkspaceId,
   runtime,
   environment,
   prompt,
@@ -125,7 +130,7 @@ export function NewThreadView({
   onSubmit,
 }: NewThreadViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const workspace = workspaces.find((entry) => entry.id === selectedWorkspaceId);
+  const isChat = workspace?.kind === "chats";
 
   useEffect(() => {
     composerRef.current?.focus();
@@ -164,21 +169,36 @@ export function NewThreadView({
             <PiLogoMark />
           </div>
           <div className="new-thread__eyebrow">New thread</div>
-          <h1 className="new-thread__title">Let&apos;s build</h1>
-          <label className="new-thread__workspace-picker">
-            <span className="sr-only">Workspace</span>
-            <select
-              className="new-thread__workspace"
-              value={workspace.id}
-              onChange={(event) => onSelectWorkspace(event.target.value)}
-            >
-              {workspaces.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <h1 className="new-thread__title">{isChat ? "Ask anything" : "Let's build"}</h1>
+          <div className="new-thread__workspace-picker">
+            <label>
+              <span className="sr-only">Workspace</span>
+              <select
+                className="new-thread__workspace"
+                value={isChat ? "" : workspace.id}
+                disabled={isChat && folders.length === 0}
+                onChange={(event) => onSelectWorkspace(event.target.value)}
+              >
+                {isChat ? <option value="">No folder</option> : null}
+                {folders.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!isChat && chatsWorkspaceId ? (
+              <button
+                aria-label="Start without a folder"
+                className="icon-button new-thread__workspace-clear"
+                title="Start without a folder"
+                type="button"
+                onClick={() => onSelectWorkspace(chatsWorkspaceId)}
+              >
+                <CloseIcon />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="new-thread__composer composer">
@@ -227,6 +247,7 @@ export function NewThreadView({
               textareaPlaceholder="Ask pi anything, use / for commands and skills"
               footer={
                 <NewThreadComposerFooter
+                  showEnvironment={!isChat}
                   runtime={runtime}
                   environment={environment}
                   provider={provider}
@@ -253,6 +274,8 @@ export function NewThreadView({
 }
 
 interface NewThreadComposerFooterProps {
+  /** Local/Worktree applies to project folders only. */
+  readonly showEnvironment: boolean;
   readonly runtime?: RuntimeSnapshot;
   readonly environment: NewThreadEnvironment;
   readonly provider: string | undefined;
@@ -271,6 +294,7 @@ interface NewThreadComposerFooterProps {
 }
 
 function NewThreadComposerFooter({
+  showEnvironment,
   runtime,
   environment,
   provider,
@@ -292,23 +316,27 @@ function NewThreadComposerFooter({
       <div className="composer__footer">
         <div className="composer__footer-row">
           <div className="composer__hint new-thread__hint">
-            <div className="new-thread__environment-group">
-              <button
-                className={`new-thread__environment ${environment === "local" ? "new-thread__environment--active" : ""}`}
-                type="button"
-                onClick={() => onSelectEnvironment("local")}
-              >
-                <span>Local</span>
-              </button>
-              <button
-                className={`new-thread__environment ${environment === "worktree" ? "new-thread__environment--active" : ""}`}
-                type="button"
-                onClick={() => onSelectEnvironment("worktree")}
-              >
-                <span>Worktree</span>
-              </button>
-            </div>
-            <span className="new-thread__hint-separator">·</span>
+            {showEnvironment ? (
+              <>
+                <div className="new-thread__environment-group">
+                  <button
+                    className={`new-thread__environment ${environment === "local" ? "new-thread__environment--active" : ""}`}
+                    type="button"
+                    onClick={() => onSelectEnvironment("local")}
+                  >
+                    <span>Local</span>
+                  </button>
+                  <button
+                    className={`new-thread__environment ${environment === "worktree" ? "new-thread__environment--active" : ""}`}
+                    type="button"
+                    onClick={() => onSelectEnvironment("worktree")}
+                  >
+                    <span>Worktree</span>
+                  </button>
+                </div>
+                <span className="new-thread__hint-separator">·</span>
+              </>
+            ) : null}
             <ModelSelector
               runtime={runtime}
               provider={provider}

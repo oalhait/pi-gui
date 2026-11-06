@@ -71,7 +71,9 @@ test("switches between app-global and per-repo model scope while worktrees inher
 
     await openSettingsSection(window, "Models");
     await expect(settingsWorkspacePicker(window)).toHaveCount(1);
-    await expect(settingsWorkspacePicker(window).locator("option")).toHaveCount(2);
+    // Both repositories, plus Chats for threads outside any project.
+    await expect(settingsWorkspacePicker(window).locator("option")).toHaveCount(3);
+    await expect(settingsWorkspacePicker(window).locator("option").last()).toHaveText("Chats");
     await settingsWorkspacePicker(window).selectOption({ label: rootWorkspaceA.name });
     await expect(settingsWorkspacePicker(window)).toHaveValue(rootWorkspaceA.id);
     await expect(window.getByLabel("Default model", { exact: true })).toHaveValue("openai:gpt-5");
@@ -119,7 +121,7 @@ test("switches between app-global and per-repo model scope while worktrees inher
 
     await openSettings(window);
     await openSettingsSection(window, "Models");
-    await expect(settingsWorkspacePicker(window).locator("option")).toHaveCount(2);
+    await expect(settingsWorkspacePicker(window).locator("option")).toHaveCount(3);
     expect(
       (await settingsWorkspacePicker(window).locator("option").allTextContents()).every(
         (text) => !/Worktree/i.test(text),
