@@ -14,6 +14,8 @@ import {
   type CreateSessionInput,
   type CreateWorktreeInput,
   type ForkThreadInput,
+  type MoveThreadInput,
+  type SetThreadParentInput,
   type ModelSettingsScopeMode,
   type NotificationPreferences,
   type RemoveWorktreeInput,
@@ -83,6 +85,14 @@ export function expectNonEmptyString(value: unknown, name: string): string {
 
 export function expectOptionalString(value: unknown, name: string): string | undefined {
   return value === undefined ? undefined : expectString(value, name);
+}
+
+/** Model stall timeout in whole seconds: 0 (off) up to an hour. */
+export function expectStallSeconds(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 3_600) {
+    throw new TypeError("seconds must be a whole number from 0 to 3600");
+  }
+  return value;
 }
 
 export function expectBoolean(value: unknown, name: string): boolean {
@@ -267,6 +277,29 @@ function expectExtensionFlags(value: unknown, label: string): ExtensionFlagValue
   );
 }
 
+export function expectMoveThreadInput(value: unknown): MoveThreadInput {
+  const record = expectRecord(value, "input");
+  return {
+    workspaceId: expectNonEmptyString(record.workspaceId, "input.workspaceId"),
+    sessionId: expectNonEmptyString(record.sessionId, "input.sessionId"),
+    destinationWorkspaceId: expectNonEmptyString(
+      record.destinationWorkspaceId,
+      "input.destinationWorkspaceId",
+    ),
+  };
+}
+
+export function expectSetThreadParentInput(value: unknown): SetThreadParentInput {
+  const record = expectRecord(value, "input");
+  return {
+    workspaceId: expectNonEmptyString(record.workspaceId, "input.workspaceId"),
+    sessionId: expectNonEmptyString(record.sessionId, "input.sessionId"),
+    ...(record.parent === undefined
+      ? {}
+      : { parent: expectSessionTarget(record.parent, "input.parent") }),
+  };
+}
+
 export function expectForkThreadInput(value: unknown): ForkThreadInput {
   const record = expectRecord(value, "input");
   const environment = record.environment;
@@ -322,7 +355,12 @@ export function expectSetChildSupervisionLoopInput(value: unknown): SetChildSupe
 export function expectNotificationPreferences(value: unknown): Partial<NotificationPreferences> {
   const record = expectRecord(value, "preferences");
   let preferences: Partial<NotificationPreferences> = {};
-  for (const key of ["backgroundCompletion", "backgroundFailure", "attentionNeeded"] as const) {
+  for (const key of [
+    "backgroundCompletion",
+    "backgroundFailure",
+    "attentionNeeded",
+    "showReplyPreview",
+  ] as const) {
     if (Object.hasOwn(record, key)) {
       preferences = { ...preferences, [key]: expectBoolean(record[key], `preferences.${key}`) };
     }

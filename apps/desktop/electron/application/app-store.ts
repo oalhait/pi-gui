@@ -3,7 +3,7 @@ import { sessionKey } from "@pi-gui/session-driver";
 import type { ExtensionFlagValues, SessionSchemaInfo } from "@pi-gui/session-driver";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
@@ -52,6 +52,9 @@ import {
   type DesktopAppState,
   type DesktopAppViewState,
   type ForkThreadInput,
+  type MoveThreadInput,
+  NO_THREAD_PARENT,
+  type SetThreadParentInput,
   type NotificationPreferences,
   type OrchestrationChildThread,
   type QueuedComposerMessage,
@@ -69,6 +72,7 @@ import {
   type TranscriptMessage,
   type WorkspaceRecord,
   type WorkspaceSessionTarget,
+  CHATS_WORKSPACE_NAME,
   isThemeMode,
   isThemePresetId,
   type CreateScheduledTaskInput,
@@ -95,6 +99,7 @@ import {
   writePersistedUiState,
 } from "../persistence/app-store-persistence";
 import { AttachmentStore } from "../persistence/attachment-store";
+import { readRunSettings, writeRunSettings } from "../persistence/run-settings-store";
 import {
   type PendingRuntimeCommandExecution,
   getLearnedCommandCompatibility,
@@ -128,7 +133,12 @@ import { decodeTaskWorkbenchTemplate, type TaskWorkbenchTemplate } from "../../c
 import { composerImageSavedSkipMessage } from "../../contracts/composer-attachments";
 import { extensionToolLabels } from "../../contracts/tool-labels";
 import { quarantinePersistedComposerAttachments } from "../ipc/composer-attachment-pixels";
-import { SessionStateMap, type QueuedComposerEditState } from "../conversation/session-state-map";
+import {
+  SessionStateMap,
+  type MessageEditState,
+  type QueuedComposerEditState,
+} from "../conversation/session-state-map";
+import { attachmentsToPersist, draftsToPersist } from "../conversation/message-edit";
 import {
   createEmptyExtensionUiState,
   serializeExtensionUiState,
@@ -167,6 +177,12 @@ import {
   isSessionActivelyViewed,
   isSessionVisibleInWindow,
 } from "../conversation/session-visibility";
+import { isRemoteWorkspaceId, remoteHostIdOf } from "../../contracts/remote-hosts";
+import {
+  RoutingDriver,
+  type DesktopDriver,
+  type RemoteDriverLookup,
+} from "../remote/routing-driver";
 
 type StateListener = (state: DesktopAppState) => void;
 type SelectedTranscriptListener = (payload: SelectedTranscriptRecord | null) => void;
@@ -191,6 +207,8 @@ export interface DesktopAppStoreOptions {
     | "builtinExtensions"
     | "connectionResume"
     | "desktopExtensions"
+    | "modelStallTimeoutMs"
+    | "onRunDiagnostic"
     | "onTurnCaptureBoundary"
     | "openUrl"
     | "turnCaptureTimeoutMs"
@@ -199,7 +217,11 @@ export interface DesktopAppStoreOptions {
     workspace: WorkspaceRef,
     options: GenerateThreadTitleOptions,
   ) => Promise<string | null | undefined>;
+  /** Remote hosts whose `pi-remote://` folders the store routes to their servers. */
+  readonly remoteHosts?: RemoteDriverLookup;
 }
+
+const NO_REMOTE_HOSTS: RemoteDriverLookup = { driverFor: () => undefined, drivers: () => [] };
 
 export class DesktopAppStore {
   private state = createEmptyDesktopAppState();
@@ -255,12 +277,13 @@ export class DesktopAppStore {
   /** Cached session schema info (version-skew flag) projected onto the transcript payload. */
   private readonly sessionSchemaInfoCache = new Map<string, SessionSchemaInfo>();
   private readonly sessionSchemaInfoInFlight = new Set<string>();
-  private readonly driver: PiSdkDriver;
+  private readonly driver: DesktopDriver;
   private readonly catalogStore: JsonCatalogStore;
   private readonly worktreeManager: GitWorktreeManager;
   private readonly worktreeRoot: string;
   private readonly isAppWorktreePath: (path: string) => Promise<boolean>;
   private readonly uiStateFilePath: string;
+  private readonly userDataDir: string;
   private readonly scheduledTasksFilePath: string;
   private scheduledTasksWritable = false;
   private readonly attachmentStore: AttachmentStore;
@@ -276,6 +299,10 @@ export class DesktopAppStore {
     PendingRuntimeCommandExecution
   >();
   private readonly reportedCompatibilityIssuesBySession = new Map<string, Set<string>>();
+  /** pi-gui's own folder for chats that belong to no project. Pi needs a working directory. */
+  private readonly chatsDir: string;
+  /** The chats folder's workspace id (its canonical path), once startup has created it. */
+  private chatsWorkspaceId = "";
   private readonly initialWorkspacePaths: readonly string[];
   private readonly getWindow: () => BrowserWindow | null;
   private readonly shouldKeepSessionDialogs: (sessionRef: SessionRef) => boolean;
@@ -308,6 +335,9 @@ export class DesktopAppStore {
       catalogStorage: this.catalogStore,
       ...(options.driverOptions ?? {}),
       isBuiltinExtensionEnabled: (name) => !this.disabledBuiltinExtensions.has(name),
+      modelStallTimeoutMs:
+        options.driverOptions?.modelStallTimeoutMs ??
+        (() => this.state.modelStallTimeoutSeconds * 1000),
       extensionFlagValuesForSession: (sessionRef) =>
         this.sessionState.extensionFlagsBySession.get(sessionKey(sessionRef)),
       ...(options.generateThreadTitleOverride
@@ -315,7 +345,10 @@ export class DesktopAppStore {
         : {}),
     };
 
-    this.driver = new PiSdkDriver(driverOptions);
+    this.driver = new RoutingDriver(
+      new PiSdkDriver(driverOptions),
+      options.remoteHosts ?? NO_REMOTE_HOSTS,
+    );
     this.worktreeRoot = join(options.userDataDir, "worktrees");
     this.isAppWorktreePath = appWorktreeRootMatcher(this.worktreeRoot);
     this.worktreeManager = new GitWorktreeManager({
@@ -323,8 +356,10 @@ export class DesktopAppStore {
       isAppWorktreePath: this.isAppWorktreePath,
     });
     this.uiStateFilePath = join(options.userDataDir, "ui-state.json");
+    this.userDataDir = options.userDataDir;
     this.scheduledTasksFilePath = join(options.userDataDir, "scheduled-tasks.json");
     this.attachmentStore = new AttachmentStore(options.userDataDir);
+    this.chatsDir = join(options.userDataDir, "chats");
     this.initialWorkspacePaths = options.initialWorkspacePaths;
     this.getWindow = options.getWindow ?? (() => null);
     this.shouldKeepSessionDialogs = options.shouldKeepSessionDialogs ?? (() => false);
@@ -423,6 +458,13 @@ export class DesktopAppStore {
       setQueuedComposerEditState: (sessionRef, editState) =>
         this.setQueuedComposerEditState(sessionRef, editState),
       getQueuedComposerEditState: (sessionRef) => this.getQueuedComposerEditState(sessionRef),
+      setMessageEditState: (sessionRef, editState) =>
+        this.setMessageEditState(sessionRef, editState),
+      getMessageEditState: (sessionRef) =>
+        this.sessionState.messageEditsBySession.get(sessionKey(sessionRef)),
+      resolveEditableEntryId: (sessionRef, messageId) =>
+        this.resolveEditableEntryId(sessionRef, messageId),
+      rewindToUserEntry: (sessionRef, entryId) => this.rewindToUserEntry(sessionRef, entryId),
       reloadTranscriptFromDriver: (sessionRef) => this.reloadTranscriptFromDriver(sessionRef),
       publishSelectedTranscriptFor: (sessionRef) => this.publishSelectedTranscriptFor(sessionRef),
       clearPendingAutoTitle: (sessionRef) => this.clearPendingAutoTitle(sessionRef),
@@ -492,6 +534,7 @@ export class DesktopAppStore {
         this.recordExtensionFlags(sessionRef, applied, workspaceDefaults),
       reloadTranscriptFromDriver: (sessionRef) => this.reloadTranscriptFromDriver(sessionRef),
       setPendingAutoTitle: (sessionRef, pending) => this.setPendingAutoTitle(sessionRef, pending),
+      rekeySession: (from, to) => this.rekeySession(from, to),
       getPendingAutoTitle: (sessionRef) => this.getPendingAutoTitle(sessionRef),
       sendMessageToSession: (sessionRef, text, attachments, sendOptions) =>
         this.conversationOwner.sendMessageToSession(sessionRef, text, attachments, sendOptions),
@@ -700,6 +743,35 @@ export class DesktopAppStore {
     return transcriptImageResponse(requestUrl, (key) => this.sessionState.transcriptCache.get(key));
   }
 
+  /** A remote host's folders or threads may have changed: relist them. */
+  async refreshRemoteCatalog(): Promise<void> {
+    await this.initialize();
+    await this.refreshState({ refreshWorktrees: false });
+  }
+
+  /**
+   * A remote host reconnected. Events sent while it was away were missed, so transcripts of its
+   * threads are reloaded: the selected one now, the others when next opened.
+   */
+  async resyncRemoteHost(hostId: string): Promise<void> {
+    await this.initialize();
+    for (const key of [...this.sessionState.loadedTranscriptKeys]) {
+      if (remoteHostIdOf(key) === hostId) {
+        this.sessionState.loadedTranscriptKeys.delete(key);
+      }
+    }
+    const selected = this.selectedSessionRef();
+    if (selected && remoteHostIdOf(selected.workspaceId) === hostId) {
+      await this.reloadTranscriptFromDriver(selected).catch((error: unknown) =>
+        console.warn(
+          `[app-store] could not reload ${sessionKey(selected)} after reconnecting`,
+          error,
+        ),
+      );
+    }
+    await this.refreshState({ refreshWorktrees: false });
+  }
+
   async getStateForView(view: DesktopAppViewState): Promise<DesktopAppState> {
     await this.initialize();
     return this.projectStateForView(view);
@@ -799,6 +871,7 @@ export class DesktopAppStore {
         selectedWorkspaceId,
         selectedSessionId,
       ),
+      editingMessageId: this.resolveEditingMessageId(selectedWorkspaceId, selectedSessionId),
       lastError:
         this.resolveSelectedSessionError(selectedWorkspaceId, selectedSessionId, false) ??
         (selectedSessionId ? undefined : state.lastError),
@@ -935,6 +1008,11 @@ export class DesktopAppStore {
     return () => {
       this.sessionEventListeners.delete(listener);
     };
+  }
+
+  /** A session's cached timeline. Session event listeners see it with their event applied. */
+  getSessionTranscript(sessionRef: SessionRef): readonly TranscriptMessage[] {
+    return this.sessionState.transcriptCache.get(sessionKey(sessionRef)) ?? [];
   }
 
   /* ── Workspace methods (delegated) ─────────────────────── */
@@ -1181,6 +1259,142 @@ export class DesktopAppStore {
     return this.workspaceOwner.createWorktree(input);
   }
 
+  async moveThread(input: MoveThreadInput): Promise<DesktopAppState> {
+    return this.workspaceOwner.moveThread(input);
+  }
+
+  /**
+   * Carries a moved thread's app-side state from its old key to its new one: draft and
+   * attachments, read/interaction times, pin and pin order, flags, user title, workbench
+   * layout, parent/child links and scheduled tasks. Caches rebuild for the new key.
+   */
+  private async rekeySession(from: SessionRef, to: SessionRef): Promise<void> {
+    const fromKey = sessionKey(from);
+    const toKey = sessionKey(to);
+    const state = this.sessionState;
+    const maps: Map<string, unknown>[] = [
+      state.composerDraftsBySession,
+      state.composerAttachmentsBySession,
+      state.lastViewedAtBySession,
+      state.lastInteractedAtBySession,
+      state.pinnedAtBySession,
+      state.extensionFlagsBySession,
+      this.taskWorkbenchTemplatesBySession,
+    ];
+    for (const map of maps) {
+      if (!map.has(fromKey)) continue;
+      map.set(toKey, map.get(fromKey));
+      map.delete(fromKey);
+    }
+    if (state.userTitledSessions.delete(fromKey)) state.userTitledSessions.add(toKey);
+    state.pinnedSessionOrder = state.pinnedSessionOrder.map((key) =>
+      key === fromKey ? toKey : key,
+    );
+    const attachments = await this.attachmentStore.read(fromKey);
+    if (attachments) {
+      await this.attachmentStore.write(toKey, attachments);
+      await this.attachmentStore.remove(fromKey);
+    }
+
+    const isFrom = (workspaceId: string, sessionId: string) =>
+      workspaceId === from.workspaceId && sessionId === from.sessionId;
+    const children = this.state.orchestrationChildren.map((child) => ({
+      ...child,
+      ...(isFrom(child.parentWorkspaceId, child.parentSessionId)
+        ? { parentWorkspaceId: to.workspaceId, parentSessionId: to.sessionId }
+        : {}),
+      ...(isFrom(child.childWorkspaceId, child.childSessionId)
+        ? { childWorkspaceId: to.workspaceId, childSessionId: to.sessionId }
+        : {}),
+    }));
+    let tasksChanged = false;
+    const scheduledTasks = this.state.scheduledTasks.map((task) => {
+      if (
+        task.target.kind !== "existing-thread" ||
+        !isFrom(task.target.workspaceId, task.target.sessionId)
+      ) {
+        return task;
+      }
+      tasksChanged = true;
+      return { ...task, target: { ...task.target, workspaceId: to.workspaceId } };
+    });
+    const rekey = (key: string) => (key === fromKey ? toKey : key);
+    const threadParentOverrides = Object.fromEntries(
+      Object.entries(this.state.threadParentOverrides).map(([child, parent]) => [
+        rekey(child),
+        rekey(parent),
+      ]),
+    );
+    this.state = {
+      ...this.state,
+      ...this.orchestrationChildrenState(children),
+      scheduledTasks,
+      threadParentOverrides,
+    };
+    await this.persistUiState();
+    if (tasksChanged) await this.persistScheduledTasks();
+  }
+
+  /** Nests a thread under another (drag in the sidebar), or puts it back at the top level. */
+  async setThreadParent(input: SetThreadParentInput): Promise<DesktopAppState> {
+    await this.initialize();
+    const child = toSessionRef(input);
+    if (!this.sessionFromState(child)) {
+      return this.withError(`Unknown session: ${input.workspaceId}:${input.sessionId}`);
+    }
+    const childKey = sessionKey(child);
+    const parentOf = this.effectiveThreadParents();
+    let parentKey = NO_THREAD_PARENT;
+    if (input.parent) {
+      const parent = toSessionRef(input.parent);
+      if (!this.sessionFromState(parent)) {
+        return this.withError(`Unknown session: ${parent.workspaceId}:${parent.sessionId}`);
+      }
+      parentKey = sessionKey(parent);
+      const seen = new Set<string>();
+      for (let cursor: string | undefined = parentKey; cursor; cursor = parentOf.get(cursor)) {
+        if (cursor === childKey) {
+          return this.withError("A thread can't go inside itself or one of its own children.");
+        }
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+      }
+    }
+    const threadParentOverrides = { ...this.state.threadParentOverrides };
+    const agentLinked = this.state.childThreadLinks.some(
+      (link) =>
+        sessionKey({ workspaceId: link.childWorkspaceId, sessionId: link.childSessionId }) ===
+        childKey,
+    );
+    // Back at the top level with no agent link to override, the entry has nothing to say.
+    if (parentKey === NO_THREAD_PARENT && !agentLinked) delete threadParentOverrides[childKey];
+    else threadParentOverrides[childKey] = parentKey;
+    this.state = {
+      ...this.state,
+      threadParentOverrides,
+      lastError: undefined,
+      revision: this.state.revision + 1,
+    };
+    await this.persistUiState();
+    return this.emit();
+  }
+
+  /** Each child's parent as the sidebar nests it: agent links, then the user's overrides. */
+  private effectiveThreadParents(): Map<string, string> {
+    const parentOf = new Map<string, string>();
+    for (const link of this.state.childThreadLinks) {
+      parentOf.set(
+        sessionKey({ workspaceId: link.childWorkspaceId, sessionId: link.childSessionId }),
+        sessionKey({ workspaceId: link.parentWorkspaceId, sessionId: link.parentSessionId }),
+      );
+    }
+    for (const [child, parent] of Object.entries(this.state.threadParentOverrides)) {
+      if (parent === NO_THREAD_PARENT) parentOf.delete(child);
+      else parentOf.set(child, parent);
+    }
+    return parentOf;
+  }
+
   async forkThread(input: ForkThreadInput): Promise<DesktopAppState> {
     return this.workspaceOwner.forkThread(input);
   }
@@ -1294,6 +1508,8 @@ export class DesktopAppStore {
     await this.initialize();
     const sessionRef = toSessionRef(target);
     await this.ensureSessionReady(sessionRef);
+    // Moving through /tree ends a message edit: the edit's later turns may no longer be shown.
+    this.conversationOwner.abandonMessageEdit(sessionRef);
 
     return this.publishTreeNavigation(
       target,
@@ -1301,38 +1517,57 @@ export class DesktopAppStore {
     );
   }
 
-  /** Edit a sent user message: rewind the thread to just before it, keeping later turns in /tree. */
-  async rewindToMessage(
-    target: WorkspaceSessionTarget,
-    sourceMessageId: string,
-  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }> {
-    await this.initialize();
-    const sessionRef = toSessionRef(target);
+  /** Puts a sent user message in the composer for editing; the thread changes only on send. */
+  async startMessageEdit(
+    sessionRef: SessionRef | undefined,
+    messageId: string,
+  ): Promise<DesktopAppState> {
+    return this.conversationOwner.startMessageEdit(sessionRef, messageId);
+  }
+
+  async cancelMessageEdit(sessionRef: SessionRef | undefined): Promise<DesktopAppState> {
+    return this.conversationOwner.cancelMessageEdit(sessionRef);
+  }
+
+  private async resolveEditableEntryId(sessionRef: SessionRef, messageId: string): Promise<string> {
     await this.ensureSessionReady(sessionRef);
     const key = sessionKey(sessionRef);
-    let entryId = sourceMessageId;
+    let entryId = messageId;
     try {
       const transcript = this.sessionState.transcriptCache.get(key) ?? [];
-      // A row Pi has identified needs no branch read; only an unidentified one is matched.
-      entryId =
-        resolveUserEntryId(transcript, [], sourceMessageId) ??
-        resolveUserEntryId(
-          transcript,
-          await this.driver.getTranscript(sessionRef),
-          sourceMessageId,
-        ) ??
-        sourceMessageId;
-      return this.publishTreeNavigation(
-        target,
-        await this.driver.rewindToUserMessage(sessionRef, entryId),
+      const branch = await this.driver.getTranscript(sessionRef);
+      // A row sent this app run may not know its entry yet; it is matched against the branch.
+      entryId = resolveUserEntryId(transcript, branch, messageId) ?? messageId;
+      const onBranch = branch.some(
+        (item) =>
+          item.kind === "message" &&
+          item.role === "user" &&
+          (item.sourceMessageId ?? item.id) === entryId,
       );
+      if (!onBranch) {
+        throw new Error(
+          `This message is not on the thread's current branch, so it can't be edited (no user message ${entryId} in session ${key}).`,
+        );
+      }
+      return entryId;
     } catch (error) {
       console.error(
-        `[app-store] editing message ${sourceMessageId} (entry ${entryId}) in ${key} failed:`,
+        `[app-store] editing message ${messageId} (entry ${entryId}) in ${key} failed:`,
         error,
       );
       throw error;
     }
+  }
+
+  /** pi's /tree on a user entry: the leaf moves to its parent, later turns stay in /tree. */
+  private async rewindToUserEntry(sessionRef: SessionRef, entryId: string): Promise<void> {
+    await this.ensureSessionReady(sessionRef);
+    const result = await this.driver.rewindToUserMessage(sessionRef, entryId);
+    if (result.cancelled || result.aborted) {
+      throw new Error("The edit was cancelled before the thread changed, so nothing was sent.");
+    }
+    await this.reloadTranscriptFromDriver(sessionRef);
+    await this.refreshSessionCommandsFor(sessionRef);
   }
 
   private async publishTreeNavigation(
@@ -1564,6 +1799,21 @@ export class DesktopAppStore {
       revision: this.state.revision + 1,
     };
     await this.persistUiState();
+    return this.emit();
+  }
+
+  async setModelStallTimeout(seconds: number): Promise<DesktopAppState> {
+    await this.initialize();
+    if (this.state.modelStallTimeoutSeconds === seconds) {
+      return structuredClone(this.state);
+    }
+    await writeRunSettings(this.userDataDir, { modelStallTimeoutSeconds: seconds });
+    this.state = {
+      ...this.state,
+      modelStallTimeoutSeconds: seconds,
+      lastError: undefined,
+      revision: this.state.revision + 1,
+    };
     return this.emit();
   }
 
@@ -2216,6 +2466,11 @@ export class DesktopAppStore {
       this.emit();
       return;
     }
+    const runSettings = await readRunSettings(this.userDataDir);
+    this.state = {
+      ...this.state,
+      modelStallTimeoutSeconds: runSettings.modelStallTimeoutSeconds,
+    };
     try {
       this.restorePersistedUiState(persisted);
     } catch (error) {
@@ -2320,14 +2575,22 @@ export class DesktopAppStore {
         workspacesToSync.set(ws.path, ws.displayName);
       }
 
+      const chatsDiagnostic = await this.prepareChatsWorkspace();
+      workspacesToSync.delete(this.chatsWorkspaceId);
       const syncDiagnostics = await Promise.all(
         [...workspacesToSync.entries()].map(([workspacePath, displayName]) =>
           this.syncStartupWorkspace(workspacePath, displayName),
         ),
       );
+      // After the folders, so a first launch gives them the earlier sort order.
+      if (this.chatsWorkspaceId) {
+        syncDiagnostics.push(
+          await this.syncStartupWorkspace(this.chatsWorkspaceId, CHATS_WORKSPACE_NAME),
+        );
+      }
       startupDiagnostics.push(
-        ...syncDiagnostics.filter((diagnostic): diagnostic is StartupDiagnostic =>
-          Boolean(diagnostic),
+        ...[chatsDiagnostic, ...syncDiagnostics].filter(
+          (diagnostic): diagnostic is StartupDiagnostic => Boolean(diagnostic),
         ),
       );
 
@@ -2397,6 +2660,7 @@ export class DesktopAppStore {
       lastInteractedAtBySession: persisted.lastInteractedAtBySession ?? {},
       pinnedAtBySession: persisted.pinnedAtBySession ?? {},
       pinnedSessionOrder: persisted.pinnedSessionOrder ?? [],
+      threadParentOverrides: persisted.threadParentOverrides ?? {},
       workspaceOrder: persisted.workspaceOrder ?? [],
       themeMode: persisted.themeMode ?? this.state.themeMode,
       themePresetId: persisted.themePresetId ?? this.state.themePresetId,
@@ -2448,6 +2712,19 @@ export class DesktopAppStore {
       persisted.extensionCommandCompatibilityByWorkspace,
     )) {
       this.extensionCommandCompatibilityByWorkspace.set(workspaceId, records);
+    }
+  }
+
+  /** Creates the chats folder and records its workspace id; chats stay unavailable on failure. */
+  private async prepareChatsWorkspace(): Promise<StartupDiagnostic | undefined> {
+    try {
+      await mkdir(this.chatsDir, { recursive: true });
+      this.chatsWorkspaceId = await realpath(this.chatsDir);
+      return undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[app-store] chats folder unavailable: ${this.chatsDir}: ${message}`);
+      return { scope: "workspace", workspacePath: this.chatsDir, message };
     }
   }
 
@@ -2551,6 +2828,7 @@ export class DesktopAppStore {
       const selectedWorkspaceId = resolveSelectedWorkspaceIdFromCatalog(
         options.selectedWorkspaceId ?? this.state.selectedWorkspaceId,
         workspacesSnapshot.workspaces,
+        this.chatsWorkspaceId,
       );
       const selectedSessionId = resolveSelectedSessionIdFromCatalog(
         selectedWorkspaceId,
@@ -2577,6 +2855,7 @@ export class DesktopAppStore {
         this.sessionState.lastViewedAtBySession,
         this.sessionState.lastInteractedAtBySession,
         this.sessionState.pinnedAtBySession,
+        this.chatsWorkspaceId,
       );
       const worktreesByWorkspace = buildWorktreeRecords(
         workspacesSnapshot.workspaces,
@@ -2730,6 +3009,7 @@ export class DesktopAppStore {
           selection.workspaceId,
           selection.sessionId,
         ),
+        editingMessageId: this.resolveEditingMessageId(selection.workspaceId, selection.sessionId),
         lastError: this.resolveSelectedSessionError(
           selection.workspaceId,
           selection.sessionId,
@@ -2786,6 +3066,15 @@ export class DesktopAppStore {
         this.taskWorkbenchTemplatesBySession.delete(key);
         changed = true;
       }
+    }
+    const overrides = Object.entries(this.state.threadParentOverrides);
+    const liveOverrides = overrides.filter(
+      ([child, parent]) =>
+        activeKeys.has(child) && (parent === NO_THREAD_PARENT || activeKeys.has(parent)),
+    );
+    if (liveOverrides.length !== overrides.length) {
+      this.state = { ...this.state, threadParentOverrides: Object.fromEntries(liveOverrides) };
+      changed = true;
     }
     if (changed) {
       this.schedulePersistUiState();
@@ -3060,11 +3349,21 @@ export class DesktopAppStore {
       return;
     }
 
-    const snapshot = await this.driver.runtimeSupervisor.getRuntimeSnapshot({
-      workspaceId: ws.workspaceId,
-      path: ws.path,
-      displayName: ws.displayName,
-    });
+    let snapshot: RuntimeSnapshot;
+    try {
+      snapshot = await this.driver.runtimeSupervisor.getRuntimeSnapshot({
+        workspaceId: ws.workspaceId,
+        path: ws.path,
+        displayName: ws.displayName,
+      });
+    } catch (error) {
+      // An offline remote host leaves its folder without a runtime until it reconnects.
+      if (isRemoteWorkspaceId(workspaceId)) {
+        console.warn(`[app-store] runtime unavailable for ${workspaceId}`, error);
+        return;
+      }
+      throw error;
+    }
     this.runtimeByWorkspace.set(workspaceId, snapshot);
     // Seed the settings-file baseline so an external edit made before the first
     // focus is still detected as changed rather than swallowed by that first check.
@@ -3633,7 +3932,9 @@ export class DesktopAppStore {
           this.updateSessionUsage(event.sessionRef, event.snapshot.usage);
           this.updateLastRunOutcome(event.snapshot);
           this.updateQueuedComposerMessages(event.sessionRef, event.snapshot.queuedMessages);
-          if (event.snapshot.status !== "running") {
+          if (event.snapshot.status === "running") {
+            this.endMessageEditForRun(event.sessionRef);
+          } else {
             this.refreshSessionCommandsCoalesced(event.sessionRef);
           }
           break;
@@ -3654,6 +3955,8 @@ export class DesktopAppStore {
           this.sessionState.sessionUsageBySession.delete(key);
           this.sessionState.queuedComposerMessagesBySession.delete(key);
           this.sessionState.queuedComposerEditsBySession.delete(key);
+          // Puts the earlier draft back rather than leaving the edit's text as the draft.
+          this.conversationOwner.abandonMessageEdit(event.sessionRef);
           this.clearPendingAutoTitle(event.sessionRef);
           this.pendingRuntimeCommandsBySession.delete(key);
           this.reportedCompatibilityIssuesBySession.delete(key);
@@ -3779,10 +4082,12 @@ export class DesktopAppStore {
     workspaces: readonly { workspaceId: string; path: string; displayName: string }[],
     preferredWorkspaceId?: string,
   ): Promise<ModelSettingsSnapshot> {
+    // App-wide settings are this computer's; a remote folder reports its server's.
+    const localWorkspaces = workspaces.filter((entry) => !isRemoteWorkspaceId(entry.workspaceId));
     const fallbackWorkspace =
       (preferredWorkspaceId
-        ? workspaces.find((entry) => entry.workspaceId === preferredWorkspaceId)
-        : undefined) ?? workspaces[0];
+        ? localWorkspaces.find((entry) => entry.workspaceId === preferredWorkspaceId)
+        : undefined) ?? localWorkspaces[0];
     if (!fallbackWorkspace) {
       return this.state.globalModelSettings;
     }
@@ -4057,6 +4362,10 @@ export class DesktopAppStore {
         state.selectedWorkspaceId,
         state.selectedSessionId,
       ),
+      editingMessageId: this.resolveEditingMessageId(
+        state.selectedWorkspaceId,
+        state.selectedSessionId,
+      ),
       lastError: this.resolveSelectedSessionError(
         state.selectedWorkspaceId,
         state.selectedSessionId,
@@ -4236,8 +4545,14 @@ export class DesktopAppStore {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
       activeView: this.state.activeView,
-      composerDraft: this.state.composerDraft || undefined,
-      composerDraftsBySession: mapToRecord(this.sessionState.composerDraftsBySession),
+      composerDraft: this.persistedSelectedComposerDraft() || undefined,
+      // A thread editing a message is saved with its draft from before Edit.
+      composerDraftsBySession: mapToRecord(
+        draftsToPersist(
+          this.sessionState.composerDraftsBySession,
+          this.sessionState.messageEditsBySession,
+        ),
+      ),
       extensionCommandCompatibilityByWorkspace: serializeCompatibilityByWorkspace(
         this.extensionCommandCompatibilityByWorkspace,
       ),
@@ -4257,6 +4572,10 @@ export class DesktopAppStore {
           ? this.sessionState.pinnedSessionOrder
           : undefined,
       workspaceOrder: this.state.workspaceOrder.length > 0 ? this.state.workspaceOrder : undefined,
+      threadParentOverrides:
+        Object.keys(this.state.threadParentOverrides).length > 0
+          ? this.state.threadParentOverrides
+          : undefined,
       modelSettingsScopeMode: this.state.modelSettingsScopeMode,
       appGlobalModelSettings: hasStoredModelSettings(this.state.globalModelSettings)
         ? this.state.globalModelSettings
@@ -4276,11 +4595,24 @@ export class DesktopAppStore {
     await writePersistedUiState(this.uiStateFilePath, payload);
   }
 
+  private persistedSelectedComposerDraft(): string {
+    const selected = this.selectedSessionRef();
+    const edit = selected
+      ? this.sessionState.messageEditsBySession.get(sessionKey(selected))
+      : undefined;
+    return edit ? edit.restoreDraft : this.state.composerDraft;
+  }
+
   async persistComposerAttachments(
     key: string,
     attachments: readonly ComposerAttachment[],
   ): Promise<void> {
-    await this.attachmentStore.write(key, cloneComposerAttachments(attachments));
+    await this.attachmentStore.write(
+      key,
+      cloneComposerAttachments(
+        attachmentsToPersist(attachments, this.sessionState.messageEditsBySession.get(key)),
+      ),
+    );
     await this.persistUiState();
   }
 
@@ -4762,7 +5094,8 @@ export class DesktopAppStore {
   setComposerDraftForSession(
     sessionRef: SessionRef,
     draft: string,
-    source: "persist" | "command" | "extension-editor-text" | "queued-message-edit",
+    source:
+      "persist" | "command" | "extension-editor-text" | "queued-message-edit" | "message-edit",
   ): void {
     const key = sessionKey(sessionRef);
     if (draft) {
@@ -4827,6 +5160,18 @@ export class DesktopAppStore {
     }
 
     return this.sessionState.queuedComposerEditsBySession.get(
+      sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId }),
+    )?.messageId;
+  }
+
+  private resolveEditingMessageId(
+    selectedWorkspaceId: string,
+    selectedSessionId: string,
+  ): string | undefined {
+    if (!selectedWorkspaceId || !selectedSessionId) {
+      return undefined;
+    }
+    return this.sessionState.messageEditsBySession.get(
       sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId }),
     )?.messageId;
   }
@@ -4914,6 +5259,26 @@ export class DesktopAppStore {
     } else {
       this.sessionState.queuedComposerEditsBySession.delete(key);
     }
+  }
+
+  setMessageEditState(sessionRef: SessionRef, editState: MessageEditState | undefined): void {
+    const key = sessionKey(sessionRef);
+    if (editState) {
+      this.sessionState.messageEditsBySession.set(key, editState);
+    } else {
+      this.sessionState.messageEditsBySession.delete(key);
+    }
+  }
+
+  /** A run that starts mid-edit (a scheduled task, a child thread) ends the edit with a notice. */
+  private endMessageEditForRun(sessionRef: SessionRef): void {
+    if (!this.conversationOwner.abandonMessageEdit(sessionRef)) return;
+    this.addExtensionNotice(sessionRef, {
+      id: `message-edit-cancelled:${randomUUID()}`,
+      level: "warning",
+      message: "A run started in this thread, so your message edit was cancelled.",
+      createdAt: new Date().toISOString(),
+    });
   }
 
   getQueuedComposerEditState(sessionRef: SessionRef): QueuedComposerEditState | undefined {
@@ -5228,11 +5593,17 @@ function formatCapabilityLabel(capability: string): string {
 function resolveSelectedWorkspaceIdFromCatalog(
   preferredWorkspaceId: string,
   workspaces: readonly { workspaceId: string }[],
+  chatsWorkspaceId: string,
 ): string {
   if (preferredWorkspaceId && workspaces.some((w) => w.workspaceId === preferredWorkspaceId)) {
     return preferredWorkspaceId;
   }
-  return workspaces[0]?.workspaceId ?? "";
+  // Without a saved choice, a project folder comes before the chats folder.
+  return (
+    workspaces.find((w) => w.workspaceId !== chatsWorkspaceId)?.workspaceId ??
+    workspaces[0]?.workspaceId ??
+    ""
+  );
 }
 
 function resolveSelectedSessionIdFromCatalog(

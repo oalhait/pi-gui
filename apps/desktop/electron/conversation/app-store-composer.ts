@@ -37,7 +37,12 @@ import {
 } from "../application/app-store-utils";
 import type { RefreshStateOptions } from "../application/refresh-state-options";
 import type { PendingRuntimeCommandExecution } from "./extension-command-compatibility";
-import type { QueuedComposerEditState, SessionStateMap } from "./session-state-map";
+import type {
+  MessageEditState,
+  QueuedComposerEditState,
+  SessionStateMap,
+} from "./session-state-map";
+import { composerAttachmentsFromRow, findEditableUserRow } from "./message-edit";
 
 type ConversationMutableState = Pick<
   SessionStateMap,
@@ -101,7 +106,8 @@ interface ConversationOwnerHost {
   setComposerDraftForSession(
     sessionRef: SessionRef,
     draft: string,
-    source: "persist" | "command" | "extension-editor-text" | "queued-message-edit",
+    source:
+      "persist" | "command" | "extension-editor-text" | "queued-message-edit" | "message-edit",
   ): void;
   ensureSessionReady(sessionRef: SessionRef): Promise<unknown>;
   refreshSessionCommandsFor(sessionRef: SessionRef): Promise<void>;
@@ -127,6 +133,12 @@ interface ConversationOwnerHost {
     editState: QueuedComposerEditState | undefined,
   ): void;
   getQueuedComposerEditState(sessionRef: SessionRef): QueuedComposerEditState | undefined;
+  setMessageEditState(sessionRef: SessionRef, editState: MessageEditState | undefined): void;
+  getMessageEditState(sessionRef: SessionRef): MessageEditState | undefined;
+  /** Pi's entry id for a user row on the thread's current branch; throws when it has none. */
+  resolveEditableEntryId(sessionRef: SessionRef, messageId: string): Promise<string>;
+  /** Moves the thread to just before a user entry and reloads its transcript. */
+  rewindToUserEntry(sessionRef: SessionRef, entryId: string): Promise<void>;
   reloadTranscriptFromDriver(sessionRef: SessionRef): Promise<void>;
   publishSelectedTranscriptFor(sessionRef: SessionRef): void;
   clearPendingAutoTitle(sessionRef: SessionRef): void;
@@ -154,6 +166,13 @@ export interface ConversationOwner {
     currentDraft?: string,
   ): Promise<DesktopAppState>;
   cancelQueuedComposerEdit(sessionRef: SessionRef | undefined): Promise<DesktopAppState>;
+  startMessageEdit(sessionRef: SessionRef | undefined, messageId: string): Promise<DesktopAppState>;
+  cancelMessageEdit(sessionRef: SessionRef | undefined): Promise<DesktopAppState>;
+  /**
+   * Ends a message edit without touching the thread, putting the earlier draft back. Returns
+   * false when the thread was not editing. Synchronous so a session event can apply it.
+   */
+  abandonMessageEdit(sessionRef: SessionRef): boolean;
   removeQueuedComposerMessage(
     sessionRef: SessionRef | undefined,
     messageId: string,
@@ -210,6 +229,9 @@ export function createConversationOwner(store: ConversationOwnerHost): Conversat
     editQueuedComposerMessage: (sessionRef, messageId, currentDraft) =>
       editQueuedComposerMessage(store, sessionRef, messageId, currentDraft),
     cancelQueuedComposerEdit: (sessionRef) => cancelQueuedComposerEdit(store, sessionRef),
+    startMessageEdit: (sessionRef, messageId) => startMessageEdit(store, sessionRef, messageId),
+    cancelMessageEdit: (sessionRef) => cancelMessageEdit(store, sessionRef),
+    abandonMessageEdit: (sessionRef) => abandonMessageEdit(store, sessionRef),
     removeQueuedComposerMessage: (sessionRef, messageId) =>
       removeQueuedComposerMessage(store, sessionRef, messageId),
     steerQueuedComposerMessage: (sessionRef, messageId) =>
@@ -376,6 +398,99 @@ async function cancelQueuedComposerEdit(
   });
 }
 
+async function startMessageEdit(
+  store: ComposerStore,
+  sessionRef: SessionRef | undefined,
+  messageId: string,
+): Promise<DesktopAppState> {
+  await store.initialize();
+  if (!sessionRef || !store.sessionFromState(sessionRef)) {
+    return store.emit();
+  }
+  if (store.sessionFromState(sessionRef)?.status === "running") {
+    throw new Error("Stop the run, or wait for it to finish, before editing a message.");
+  }
+
+  const key = sessionKey(sessionRef);
+  const entryId = await store.resolveEditableEntryId(sessionRef, messageId);
+  const row = findEditableUserRow(
+    store.conversationState.transcriptCache.get(key) ?? [],
+    messageId,
+  );
+  if (!row) {
+    throw new Error(`No user message ${messageId} in session ${key}.`);
+  }
+  // Picking another message while editing keeps the draft from before the first Edit.
+  const previous = store.getMessageEditState(sessionRef);
+  store.setMessageEditState(sessionRef, {
+    messageId: row.id,
+    entryId,
+    restoreDraft:
+      previous?.restoreDraft ?? store.conversationState.composerDraftsBySession.get(key) ?? "",
+    restoreAttachments:
+      previous?.restoreAttachments ??
+      cloneComposerAttachments(store.conversationState.composerAttachmentsBySession.get(key) ?? []),
+  });
+  // The composer shows the readable @mentions; sending adds the thread ids back.
+  store.setComposerDraftForSession(sessionRef, stripThreadReferences(row.text), "message-edit");
+  // Not written to disk: while editing, the saved attachments stay the ones from before Edit.
+  setComposerAttachments(store, sessionRef, composerAttachmentsFromRow(row));
+  return store.refreshState({
+    clearLastError: true,
+    markSelectedSessionViewed: false,
+  });
+}
+
+async function cancelMessageEdit(
+  store: ComposerStore,
+  sessionRef: SessionRef | undefined,
+): Promise<DesktopAppState> {
+  await store.initialize();
+  if (
+    !sessionRef ||
+    !store.sessionFromState(sessionRef) ||
+    !abandonMessageEdit(store, sessionRef)
+  ) {
+    return store.emit();
+  }
+  return store.refreshState({
+    clearLastError: true,
+    markSelectedSessionViewed: false,
+  });
+}
+
+function abandonMessageEdit(store: ComposerStore, sessionRef: SessionRef): boolean {
+  const edit = store.getMessageEditState(sessionRef);
+  if (!edit) return false;
+  store.setMessageEditState(sessionRef, undefined);
+  store.setComposerDraftForSession(sessionRef, edit.restoreDraft, "message-edit");
+  setComposerAttachments(store, sessionRef, edit.restoreAttachments);
+  // Already what is saved (see persistComposerAttachments); written again in case an edit raced it.
+  void store
+    .persistComposerAttachments(sessionKey(sessionRef), edit.restoreAttachments)
+    .catch((error: unknown) => {
+      console.error("[app-store] saving the restored attachments failed", error);
+    });
+  return true;
+}
+
+function setComposerAttachments(
+  store: ComposerStore,
+  sessionRef: SessionRef,
+  attachments: readonly ComposerAttachment[],
+): void {
+  const key = sessionKey(sessionRef);
+  if (attachments.length > 0) {
+    store.conversationState.composerAttachmentsBySession.set(
+      key,
+      cloneComposerAttachments(attachments),
+    );
+  } else {
+    store.conversationState.composerAttachmentsBySession.delete(key);
+  }
+  store.publishComposerAttachments(sessionRef, attachments);
+}
+
 async function removeQueuedComposerMessage(
   store: ComposerStore,
   sessionRef: SessionRef | undefined,
@@ -523,8 +638,20 @@ async function submitComposerToSession(
   const selectedSession = store.sessionFromState(sessionRef);
   const isRunning = selectedSession?.status === "running";
   const editingState = store.getQueuedComposerEditState(sessionRef);
+  // Sending an edited message is when the thread rewinds: the new message starts a sibling
+  // branch of the one it replaces. An extension command is not a message, so it leaves the edit.
+  const messageEdit =
+    isRunning || resolvedRuntimeSlashCommand?.source === "extension"
+      ? undefined
+      : store.getMessageEditState(sessionRef);
+  let rewound = false;
   let optimisticSteerMessage: SessionQueuedMessage | undefined;
   try {
+    if (messageEdit) {
+      store.setMessageEditState(sessionRef, undefined);
+      await store.rewindToUserEntry(sessionRef, messageEdit.entryId);
+      rewound = true;
+    }
     if (resolvedRuntimeSlashCommand) {
       const learnedCompatibility = store.getLearnedRuntimeCommandCompatibility(
         sessionRef.workspaceId,
@@ -617,6 +744,11 @@ async function submitComposerToSession(
       markSelectedSessionViewed: false,
     });
   } catch (error) {
+    if (messageEdit && !rewound) {
+      // The thread is unchanged, so the composer is still editing that message. Restored
+      // before the attachments are saved, so the saved ones stay those from before Edit.
+      store.setMessageEditState(sessionRef, messageEdit);
+    }
     if (resolvedRuntimeSlashCommand) {
       store.finishRuntimeCommandExecution(sessionRef);
     }

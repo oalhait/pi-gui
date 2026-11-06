@@ -100,7 +100,8 @@ test("the Working line shows the wait for the model's first output and Pi's retr
     await test.step("a reply that has not started yet", async () => {
       await composer.fill("Slow question");
       await composer.press("Enter");
-      await expect(wait).toHaveText(/^Waiting for the model · \d+s$/);
+      // The scripted provider sent its response headers, so the request has been accepted.
+      await expect(wait).toHaveText(/^Request accepted, waiting for the model · \d+s$/);
       await expect(wait).toHaveText(/· [2-9]s$/);
       await expect(notes).toHaveCount(0);
       slow.open();
@@ -130,7 +131,7 @@ test("the Working line shows the wait for the model's first output and Pi's retr
 
       await composer.fill("Question about it");
       await composer.press("Enter");
-      await expect(wait).toHaveText(/^Waiting for the model/);
+      await expect(wait).toHaveText(/^Request accepted, waiting for the model/);
       // The scripted model declares no prompt cache, so its expiry is unknown.
       await expect(notes).toHaveText([
         /^Large context \(40\dk tokens\), so the first response may take a while\.$/,

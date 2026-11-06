@@ -71,6 +71,20 @@ export interface SessionModelWait {
   readonly since: Timestamp;
   /** Pi's automatic retry after a transient failure, such as an overloaded provider. */
   readonly retry?: SessionModelRetry;
+  /** What the current request has done on the wire; absent for transports pi-gui cannot see. */
+  readonly request?: SessionModelRequest;
+}
+
+/** The current model request before its first output. */
+export interface SessionModelRequest {
+  /** "sending" until the provider's response headers arrive, then "accepted". */
+  readonly phase: "sending" | "accepted";
+  /** HTTP status of the response, once accepted. */
+  readonly status?: number;
+  /** Keep-alive pings the provider has sent while the model produced nothing. */
+  readonly pings: number;
+  /** When pi-gui ends the attempt as stalled if nothing arrives; absent when that is off. */
+  readonly stallAt?: Timestamp;
 }
 
 export interface SessionModelRetry {
@@ -213,6 +227,16 @@ export interface ForkSessionOptions {
   /** Optional title for the forked session. Defaults to the source session title. */
   readonly title?: string;
   /** Flag values for the fork's pi session, normally the ones the source started with. */
+  readonly extensionFlagValues?: ExtensionFlagValues;
+}
+
+/**
+ * Moves an idle thread to another folder. The history is copied there with the same session
+ * id, and the original file is kept beside itself as `<file>.moved` instead of being deleted.
+ */
+export interface MoveSessionOptions {
+  readonly targetWorkspace: WorkspaceRef;
+  /** Flag values for the moved thread's pi session, normally the ones it started with. */
   readonly extensionFlagValues?: ExtensionFlagValues;
 }
 
@@ -476,6 +500,7 @@ export interface SessionDriver {
   createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot>;
   validateForkSession(sourceRef: SessionRef, options: ForkSessionOptions): Promise<void>;
   forkSession(sourceRef: SessionRef, options: ForkSessionOptions): Promise<ForkSessionResult>;
+  moveSession(sourceRef: SessionRef, options: MoveSessionOptions): Promise<SessionSnapshot>;
   openSession(sessionRef: SessionRef): Promise<SessionSnapshot>;
   archiveSession(sessionRef: SessionRef): Promise<void>;
   unarchiveSession(sessionRef: SessionRef): Promise<void>;

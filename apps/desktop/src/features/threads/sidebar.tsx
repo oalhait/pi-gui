@@ -14,6 +14,8 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -21,6 +23,7 @@ import {
   type DraggableSyntheticListeners,
   type DragEndEvent,
   type DragStartEvent,
+  type Modifier,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -66,6 +69,7 @@ import type { ThreadMenuState } from "./hooks/use-thread-actions";
 import { archiveThreadShortcut, ThreadActionsMenu } from "./thread-actions";
 import {
   recencyHistoryExpansionKey,
+  TOP_LEVEL_HISTORY_EXPANSION_KEY,
   flattenThreadTrees,
   sessionThreadKey,
   threadHistoryPreview,
@@ -191,6 +195,7 @@ export function Sidebar(props: SidebarProps) {
       },
     );
   };
+  const topLevelThreads = threadSidebarModel.topLevelThreads;
   const shortcutOrder = visibleThreadShortcutOrder({
     grouping: threadGrouping,
     model: threadSidebarModel,
@@ -236,6 +241,7 @@ export function Sidebar(props: SidebarProps) {
       ...threadSidebarModel.workspaceGroups
         .filter((group) => holds(group.threads))
         .map((group) => workspaceHistoryExpansionKey(group.workspace.id)),
+      ...(holds(topLevelThreads) ? [TOP_LEVEL_HISTORY_EXPANSION_KEY] : []),
     ];
     setExpandedHistory((current) =>
       keys.every((key) => current.has(key)) ? current : new Set([...current, ...keys]),
@@ -290,10 +296,42 @@ export function Sidebar(props: SidebarProps) {
   const pinnedSortableId = (thread: ThreadListEntry) => `pinned:${sessionThreadKey(thread)}`;
   const pinnedSessionKeyFromSortableId = (id: string) =>
     id.startsWith("pinned:") ? id.slice("pinned:".length) : id;
+  // recencyOrder holds every unarchived thread, nested ones included.
+  const threadByKey = new Map(
+    threadSidebarModel.recencyOrder.map((thread) => [sessionThreadKey(thread), thread] as const),
+  );
+  const threadByDndId = (id: string) =>
+    id.startsWith(THREAD_DND_PREFIX)
+      ? threadByKey.get(id.slice(THREAD_DND_PREFIX.length))
+      : undefined;
+  /** The thread a drop on this row would nest under: history rows, and pinned rows too. */
+  const dropTargetThread = (id: string) =>
+    threadByDndId(id) ??
+    (id.startsWith("pinned:") ? threadByKey.get(pinnedSessionKeyFromSortableId(id)) : undefined);
 
   // Collision detection based on workspace row headers only (~30px top of each group),
   // not the full group height including all sessions.
   const headerCollision: CollisionDetection = (args) => {
+    if (String(args.active.id).startsWith(THREAD_DND_PREFIX)) {
+      // A thread drops onto the row under the pointer, never onto itself or its own children.
+      const pointer = args.pointerCoordinates;
+      const dragged = threadByDndId(String(args.active.id));
+      if (!pointer || !dragged) return [];
+      const excluded = descendantKeys(dragged);
+      excluded.add(sessionThreadKey(dragged));
+      for (const container of args.droppableContainers) {
+        const target = dropTargetThread(String(container.id));
+        const rect = container.rect.current;
+        if (!target || !rect || excluded.has(sessionThreadKey(target))) continue;
+        const inside =
+          pointer.x >= rect.left &&
+          pointer.x <= rect.left + rect.width &&
+          pointer.y >= rect.top &&
+          pointer.y <= rect.top + rect.height;
+        if (inside) return [{ id: container.id, data: { droppableContainer: container } }];
+      }
+      return [];
+    }
     if (String(args.active.id).startsWith("pinned:")) {
       const pointerY = args.pointerCoordinates?.y;
       if (pointerY == null) return [];
@@ -329,7 +367,8 @@ export function Sidebar(props: SidebarProps) {
 
     let closest: { id: string; distance: number } | null = null;
     for (const container of args.droppableContainers) {
-      if (String(container.id).startsWith("pinned:")) {
+      const containerId = String(container.id);
+      if (containerId.startsWith("pinned:") || containerId.startsWith(THREAD_DND_PREFIX)) {
         continue;
       }
       const rect = container.rect.current;
@@ -379,6 +418,22 @@ export function Sidebar(props: SidebarProps) {
     setActiveId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+
+    const dragged = threadByDndId(String(active.id));
+    if (dragged) {
+      const parent = dropTargetThread(String(over.id));
+      if (!parent || dragged.parentKey === sessionThreadKey(parent)) return;
+      void updateSnapshot(setSnapshot, () =>
+        api.setThreadParent({
+          workspaceId: dragged.workspaceId,
+          sessionId: dragged.session.id,
+          parent: { workspaceId: parent.workspaceId, sessionId: parent.session.id },
+        }),
+      ).catch((error: unknown) => {
+        console.error("[renderer] setThreadParent failed", error);
+      });
+      return;
+    }
 
     if (String(active.id).startsWith("pinned:")) {
       const oldIndex = pinnedSortableIds.indexOf(String(active.id));
@@ -430,6 +485,7 @@ export function Sidebar(props: SidebarProps) {
   const activeFolder = activeId
     ? rootGroups.find((group) => group.workspace.id === activeId)?.workspace
     : undefined;
+  const activeThread = activeId ? threadByDndId(activeId) : undefined;
   const activePinnedThread = activeId?.startsWith("pinned:")
     ? pinnedThreads.find((thread) => pinnedSortableId(thread) === activeId)
     : undefined;
@@ -550,10 +606,12 @@ export function Sidebar(props: SidebarProps) {
           </div>
         </div>
 
-        {visibleWorkspaces.length === 0 ? (
+        {visibleWorkspaces.length === 0 &&
+        threadSidebarModel.recencyOrder.length === 0 &&
+        threadSidebarModel.archivedThreads.length === 0 ? (
           <div className="empty-state" data-testid="empty-state">
             <h2>No folders yet</h2>
-            <p>Open a project folder to start building a workspace and session list.</p>
+            <p>Start a chat with New thread, or open a project folder to work in it.</p>
             <button
               className="button button--primary"
               type="button"
@@ -589,6 +647,19 @@ export function Sidebar(props: SidebarProps) {
                     pinnedThreads={pinnedThreads}
                     sortableIds={pinnedSortableIds}
                     sortableIdForThread={pinnedSortableId}
+                    selectedWorkspace={selectedWorkspace}
+                    selectedSession={selectedSession}
+                    threadMenu={threadMenu}
+                    onArchiveSession={onArchiveSession}
+                    onSelectSession={onSelectSession}
+                    onSetSessionPinned={onSetSessionPinned}
+                  />
+                ) : null}
+                {threadGrouping === "workspace" && topLevelThreads.length > 0 ? (
+                  <TopLevelThreadsView
+                    threads={topLevelThreads}
+                    historyExpanded={expandedHistory.has(TOP_LEVEL_HISTORY_EXPANSION_KEY)}
+                    onToggleHistory={() => toggleHistoryExpanded(TOP_LEVEL_HISTORY_EXPANSION_KEY)}
                     selectedWorkspace={selectedWorkspace}
                     selectedSession={selectedSession}
                     threadMenu={threadMenu}
@@ -700,8 +771,10 @@ export function Sidebar(props: SidebarProps) {
                   />
                 ) : null}
               </div>
-              <DragOverlay>
-                {activePinnedThread ? (
+              <DragOverlay modifiers={activeThread ? [besidePointer] : undefined}>
+                {activeThread ? (
+                  <div className="thread-drag-pill">{activeThread.session.title}</div>
+                ) : activePinnedThread ? (
                   <ThreadSessionRow
                     active={
                       activePinnedThread.workspaceId === selectedWorkspace?.id &&
@@ -1030,6 +1103,59 @@ function WorkspaceFolderContent(
   );
 }
 
+/** Threads outside any folder, drawn as loose rows above the folders in folder grouping. */
+function TopLevelThreadsView({
+  threads,
+  historyExpanded,
+  onToggleHistory,
+  selectedWorkspace,
+  selectedSession,
+  threadMenu,
+  onArchiveSession,
+  onSelectSession,
+  onSetSessionPinned,
+}: {
+  readonly threads: readonly ThreadListEntry[];
+  readonly historyExpanded: boolean;
+  readonly onToggleHistory: () => void;
+  readonly selectedWorkspace: WorkspaceRecord | undefined;
+  readonly selectedSession: SessionRecord | undefined;
+  readonly threadMenu: ThreadMenuState;
+  readonly onArchiveSession: (target: { workspaceId: string; sessionId: string }) => void;
+  readonly onSelectSession: (target: { workspaceId: string; sessionId: string }) => void;
+  readonly onSetSessionPinned: (
+    target: { workspaceId: string; sessionId: string },
+    pinned: boolean,
+  ) => void;
+}) {
+  const history = threadHistoryPreview(threads, historyExpanded);
+  return (
+    <section className="top-level-threads" data-testid="top-level-threads">
+      <div className="session-list session-list--history">
+        {history.visible.map((thread) => (
+          <HistoryThreadRow
+            key={`${thread.workspaceId}:${thread.session.id}`}
+            thread={thread}
+            selectedWorkspace={selectedWorkspace}
+            selectedSession={selectedSession}
+            threadMenu={threadMenu}
+            onArchiveSession={onArchiveSession}
+            onSelectSession={onSelectSession}
+            onSetSessionPinned={onSetSessionPinned}
+          />
+        ))}
+      </div>
+      {history.overflow ? (
+        <HistoryToggle
+          expanded={historyExpanded}
+          label="threads without a folder"
+          onToggle={onToggleHistory}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function RecencyThreadSectionView({
   section,
   historyExpanded,
@@ -1112,12 +1238,24 @@ function HistoryThreadRow({
 }) {
   const active =
     thread.workspaceId === selectedWorkspace?.id && thread.session.id === selectedSession?.id;
+  // Drag a row onto another to nest it there; every row is also a place to drop one.
+  const dndId = threadDndId(thread);
+  const drag = useDraggable({ id: dndId, data: { thread } });
+  const drop = useDroppable({ id: dndId, data: { thread } });
   return (
     <ThreadSessionRow
+      ref={(node) => {
+        drag.setNodeRef(node);
+        drop.setNodeRef(node);
+      }}
       active={active}
       showContext={showContext}
       thread={thread}
       threadMenu={threadMenu}
+      dragging={drag.isDragging}
+      dropTarget={drop.isOver && !drag.isDragging}
+      dragAttributes={drag.attributes}
+      dragListeners={drag.listeners}
       onAction={() =>
         onArchiveSession({
           workspaceId: thread.workspaceId,
@@ -1564,6 +1702,33 @@ function SortablePinnedThreadRow({
   );
 }
 
+const THREAD_DND_PREFIX = "thread:";
+
+/** Shows a dragged thread's label just below and right of the pointer, clear of the drop row. */
+const besidePointer: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
+  if (!(activatorEvent instanceof PointerEvent) || !draggingNodeRect) return transform;
+  return {
+    ...transform,
+    x: transform.x + activatorEvent.clientX - draggingNodeRect.left + 12,
+    y: transform.y + activatorEvent.clientY - draggingNodeRect.top + 12,
+  };
+};
+
+function threadDndId(thread: ThreadListEntry): string {
+  return `${THREAD_DND_PREFIX}${sessionThreadKey(thread)}`;
+}
+
+/** Every thread nested under this one, at any depth: it cannot become their child. */
+function descendantKeys(thread: ThreadListEntry): Set<string> {
+  const keys = new Set<string>();
+  const pending = [...(thread.children ?? [])];
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    keys.add(sessionThreadKey(next));
+    pending.push(...(next.children ?? []));
+  }
+  return keys;
+}
+
 function sessionIndicatorVariant(
   thread: ThreadListEntry,
 ): "running" | "failed" | "unseen" | "none" {
@@ -1585,6 +1750,8 @@ interface ThreadSessionRowProps {
   readonly showContext?: boolean;
   readonly overlay?: boolean;
   readonly dragging?: boolean;
+  /** Another thread is being dragged over this row and would nest under it. */
+  readonly dropTarget?: boolean;
   readonly style?: CSSProperties;
   readonly dragAttributes?: DraggableAttributes;
   readonly dragListeners?: DraggableSyntheticListeners;
@@ -1603,6 +1770,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
       showContext = false,
       overlay = false,
       dragging = false,
+      dropTarget = false,
       style,
       dragAttributes,
       dragListeners,
@@ -1620,7 +1788,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
     const children = thread.children ?? [];
     const childrenOpen = !tree?.collapsed.has(threadKey);
     const pinned = Boolean(thread.session.pinnedAt);
-    const actionContext = showContext ? ` in ${thread.contextLabel}` : "";
+    const actionContext = showContext && thread.contextLabel ? ` in ${thread.contextLabel}` : "";
     const shortcut = tree?.shortcuts?.get(sessionThreadKey(thread));
     const shortcutBadge = overlay ? undefined : shortcut;
     const menuOpen =
@@ -1633,6 +1801,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
       active ? "session-row--active" : "",
       pinned ? "session-row--pinned" : "",
       dragging ? "session-row--dragging" : "",
+      dropTarget ? "session-row--drop-target" : "",
       overlay ? "session-row--overlay" : "",
       shortcutBadge ? "session-row--shortcut" : "",
     ]
@@ -1701,7 +1870,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
               <span className="session-row__title-line">
                 <span className="session-row__title">{thread.session.title}</span>
               </span>
-              {showContext ? (
+              {showContext && thread.contextLabel ? (
                 <span className="session-row__context">{thread.contextLabel}</span>
               ) : null}
             </span>

@@ -12,6 +12,7 @@ import type {
 import type {
   CreateSessionOptions,
   ForkSessionOptions,
+  MoveSessionOptions,
   ForkSessionResult,
   HostUiResponse,
   SessionDriver,
@@ -65,6 +66,10 @@ export class PiSdkDriver implements SessionDriver {
 
   forkSession(sourceRef: SessionRef, options: ForkSessionOptions): Promise<ForkSessionResult> {
     return this.supervisor.forkSession(sourceRef, options);
+  }
+
+  moveSession(sourceRef: SessionRef, options: MoveSessionOptions): Promise<SessionSnapshot> {
+    return this.supervisor.moveSession(sourceRef, options);
   }
 
   openSession(sessionRef: SessionRef): Promise<SessionSnapshot> {

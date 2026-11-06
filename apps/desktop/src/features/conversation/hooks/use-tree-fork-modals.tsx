@@ -9,7 +9,6 @@ import {
 } from "react";
 import type { SessionTreeSnapshot } from "@pi-gui/session-driver/types";
 import {
-  type AppView,
   type DesktopAppState,
   type ForkThreadInput,
   type NewThreadEnvironment,
@@ -45,8 +44,12 @@ interface UseTreeForkModalsParams {
   readonly selectedSession: SessionRecord | undefined;
   readonly selectedSessionKey: string;
   readonly rootWorkspace: WorkspaceRecord | undefined;
-  readonly activeView: AppView | undefined;
   readonly setComposerDraft: Dispatch<SetStateAction<string>>;
+  /**
+   * Sends a pending debounced draft write now. Edit and Cancel go after it, so a late write
+   * cannot replace the text they put in the composer.
+   */
+  readonly flushComposerDraft: () => void;
   readonly focusComposer: () => void;
 }
 
@@ -65,10 +68,11 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     selectedSession,
     selectedSessionKey,
     rootWorkspace,
-    activeView,
     setComposerDraft,
+    flushComposerDraft,
     focusComposer,
   } = params;
+  const activeView = snapshot?.activeView;
 
   const [treeModalState, setTreeModalState] = useState<TreeModalState>({
     open: false,
@@ -83,6 +87,8 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
 
   const editingMessage = useRef(false);
   const [editError, setEditError] = useState<{ sessionKey: string; message: string }>();
+  // Edit only puts the message in the composer; the thread rewinds when the edit is sent, so
+  // Cancel (or Esc) leaves it exactly as it was and gives the earlier draft back.
   const editFromMessage = useCallback(
     (message: SessionTranscriptMessage) => {
       if (
@@ -136,10 +142,24 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
       selectedSession,
       selectedSessionKey,
       setSnapshot,
-      setComposerDraft,
+      flushComposerDraft,
       focusComposer,
     ],
   );
+  const editingMessageId = snapshot?.editingMessageId;
+  const cancelMessageEdit = useCallback(() => {
+    if (!api) return;
+    flushComposerDraft();
+    void api
+      .cancelMessageEdit()
+      .then((state) => {
+        applySnapshotIfNewer(setSnapshot, state);
+        focusComposer();
+      })
+      .catch((error: unknown) => {
+        console.error("[renderer] cancelMessageEdit failed", error);
+      });
+  }, [api, setSnapshot, flushComposerDraft, focusComposer]);
   const dismissEditError = useCallback(() => setEditError(undefined), []);
 
   const closeTreeModal = useCallback(() => {
@@ -329,10 +349,11 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
     closeForkModal,
     openForkModal,
     editFromMessage: selectedSession?.status === "running" ? undefined : editFromMessage,
+    cancelMessageEdit: editingMessageId ? cancelMessageEdit : undefined,
     /** A failed Edit for the selected thread, shown until dismissed or the next Edit. */
     editError: editError?.sessionKey === selectedSessionKey ? editError.message : undefined,
     dismissEditError,
     handleForkSubmit,
-    canUseWorktree: Boolean(rootWorkspace),
+    canUseWorktree: rootWorkspace !== undefined && rootWorkspace.kind !== "chats",
   };
 }

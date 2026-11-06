@@ -38,6 +38,21 @@ export interface QueuedComposerEditState {
 }
 
 /**
+ * Editing a sent user message. Nothing in the thread changes until the edit is sent: then the
+ * leaf moves to just before `entryId` and the text is sent, starting a sibling branch. Cancel
+ * puts back the draft and attachments the composer held before. Kept in memory only, and
+ * never saved as the draft (see persistUiState), so a restart cancels the edit losslessly.
+ */
+export interface MessageEditState {
+  /** The transcript row's id, which the renderer marks from. */
+  readonly messageId: string;
+  /** Pi's session entry for that row, resolved when the edit started. */
+  readonly entryId: string;
+  readonly restoreDraft: string;
+  readonly restoreAttachments: readonly ComposerAttachment[];
+}
+
+/**
  * Consolidates all per-session Maps (and one Set) that DesktopAppStore
  * maintains for runtime session state.  Having them in a single class
  * makes pruning and deletion consistent — every map is cleaned in one
@@ -49,6 +64,7 @@ export class SessionStateMap {
   readonly composerAttachmentsBySession = new Map<string, ComposerAttachment[]>();
   readonly queuedComposerMessagesBySession = new Map<string, QueuedComposerMessage[]>();
   readonly queuedComposerEditsBySession = new Map<string, QueuedComposerEditState>();
+  readonly messageEditsBySession = new Map<string, MessageEditState>();
   readonly sessionConfigBySession = new Map<string, SessionConfig>();
   readonly lastViewedAtBySession = new Map<string, string>();
   readonly lastInteractedAtBySession = new Map<string, string>();
@@ -104,6 +120,7 @@ export class SessionStateMap {
       this.composerAttachmentsBySession,
       this.queuedComposerMessagesBySession,
       this.queuedComposerEditsBySession,
+      this.messageEditsBySession,
       this.sessionConfigBySession,
       this.lastViewedAtBySession,
       this.lastInteractedAtBySession,
@@ -177,6 +194,7 @@ export class SessionStateMap {
     this.composerAttachmentsBySession.delete(key);
     this.queuedComposerMessagesBySession.delete(key);
     this.queuedComposerEditsBySession.delete(key);
+    this.messageEditsBySession.delete(key);
     this.sessionConfigBySession.delete(key);
     this.lastViewedAtBySession.delete(key);
     this.lastInteractedAtBySession.delete(key);

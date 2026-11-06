@@ -10,6 +10,8 @@ export type {
 } from "./extension-ui-state.js";
 export type { BuiltinExtension } from "./builtin-extensions.js";
 export type { ConnectionResumePolicy } from "./connection-resume.js";
+export type { RunDiagnostic } from "./run-diagnostics.js";
+export { DEFAULT_MODEL_STALL_TIMEOUT_MS } from "./run-diagnostics.js";
 export type { PiSdkDriverConfig } from "./pi-sdk-driver.js";
 export { createPiSdkDriver, PiSdkDriver } from "./pi-sdk-driver.js";
 export {

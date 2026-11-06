@@ -38,10 +38,11 @@ export function deriveWorkspaceContext(
     (workspace) =>
       workspace.kind === "worktree" && !workspacesById.has(workspace.rootWorkspaceId ?? ""),
   );
+  // Project folders only: Chats is not a folder the user opened.
   const visibleWorkspaces =
     primaryWorkspaces.length > 0
       ? [...primaryWorkspaces, ...orphanWorkspaces]
-      : snapshot.workspaces;
+      : snapshot.workspaces.filter((workspace) => workspace.kind !== "chats");
   const linkedWorktreeByWorkspaceId = new Map(
     Object.values(snapshot.worktreesByWorkspace)
       .flat()

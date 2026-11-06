@@ -14,7 +14,7 @@ import {
 } from "../helpers/electron-app";
 
 for (const question of ["First fork question", "Second fork question"]) {
-  test(`edits ${question} by rewinding the thread to just before it`, async ({}, testInfo) => {
+  test(`editing ${question} marks the turns it replaces, and Cancel leaves them`, async ({}, testInfo) => {
     const userDataDir = await makeUserDataDir();
     const agentDir = join(userDataDir, "agent");
     const workspacePath = await makeWorkspace("message-actions");
@@ -71,20 +71,30 @@ for (const question of ["First fork question", "Second fork question"]) {
           )
           .toEqual(["image"]);
       }
-      await expect(transcript).not.toContainText(question);
-      await expect(transcript).not.toContainText("Second fork answer");
-      await expect(transcript).not.toContainText("Third fork question");
+      // Nothing changes in the thread until the edit is sent: the edited message and the
+      // turns after it stay, faded as the ones the edit will replace.
+      const editBar = window.getByTestId("composer-message-edit");
+      await expect(editBar).toContainText("Editing an earlier message");
+      await expect(transcript).toContainText("Third fork question");
+      const superseded = transcript.locator(".timeline__virtual-row--superseded");
+      await expect(superseded.locator(".timeline-item--user", { hasText: question })).toHaveCount(
+        1,
+      );
+      await expect(superseded.filter({ hasText: "Third fork answer" })).toHaveCount(1);
       if (question === "Second fork question") {
-        await expect(transcript).toContainText("First fork answer");
-      } else {
-        await expect(transcript.locator(".timeline-item--user")).toHaveCount(0);
+        await expect(
+          superseded.locator(".timeline-item--user", { hasText: "First fork question" }),
+        ).toHaveCount(0);
       }
       await expect(window.getByTestId("composer-error-banner")).toHaveCount(0);
-      // The later turns stay in the session file as another branch, reachable from /tree.
-      await window.getByTestId("composer").fill("/tree");
-      await window.getByTestId("composer").press("Enter");
-      await expect(window.getByTestId("tree-modal")).toContainText("Third fork answer");
-      await window.getByRole("button", { name: "Close tree modal" }).click();
+      await editBar.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(editBar).toHaveCount(0);
+      await expect(window.getByTestId("composer")).toHaveValue("");
+      await expect
+        .poll(async () => (await getDesktopState(window)).composerAttachments)
+        .toEqual([]);
+      await expect(superseded).toHaveCount(0);
+      await expect(transcript).toContainText("Third fork answer");
     } finally {
       await harness.close();
     }

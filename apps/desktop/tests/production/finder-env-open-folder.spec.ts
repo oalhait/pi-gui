@@ -66,7 +66,7 @@ test("launches a packaged app under a Finder-style PATH and opens the first fold
       .poll(async () => {
         const state = await getDesktopState(window);
         return {
-          workspaceCount: state.workspaces.length,
+          workspaceCount: state.workspaces.filter((workspace) => workspace.kind !== "chats").length,
           lastError: state.lastError ?? null,
         };
       })

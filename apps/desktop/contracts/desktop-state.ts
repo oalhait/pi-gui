@@ -28,7 +28,12 @@ export type {
 } from "./scheduled-tasks";
 
 export type AppView = "threads" | "new-thread" | "scheduled" | "skills" | "extensions" | "settings";
-export type WorkspaceKind = "primary" | "worktree";
+/**
+ * `chats` is pi-gui's own folder for top-level chats: threads that belong to no project.
+ * There is at most one, it has no worktrees, and the sidebar shows it as Chats, not a folder.
+ */
+export type WorkspaceKind = "primary" | "worktree" | "chats";
+export const CHATS_WORKSPACE_NAME = "Chats";
 export type WorktreeStatus = "ready" | "missing" | "error";
 export type NewThreadEnvironment = "local" | "worktree";
 export type ThemeMode = "system" | "light" | "dark";
@@ -64,12 +69,15 @@ export type ComposerDraftSyncSource =
   | "remote-persist"
   | "command"
   | "extension-editor-text"
-  | "queued-message-edit";
+  | "queued-message-edit"
+  | "message-edit";
 
 export interface NotificationPreferences {
   readonly backgroundCompletion: boolean;
   readonly backgroundFailure: boolean;
   readonly attentionNeeded: boolean;
+  /** Completion and failure notifications show the start of the reply, not a generic line. */
+  readonly showReplyPreview: boolean;
 }
 
 export interface ComposerImageAttachment {
@@ -462,6 +470,23 @@ export type ForkThreadInput = {
   readonly position?: ForkThreadPosition;
 };
 
+/** A threadParentOverrides value: the user moved the thread out of its parent. */
+export const NO_THREAD_PARENT = "none";
+
+/** Nests a thread under another one, or with no parent puts it back at the top level. */
+export interface SetThreadParentInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly parent?: WorkspaceSessionTarget;
+}
+
+/** Moves an idle thread to another project folder, or out of any folder (the Chats workspace). */
+export interface MoveThreadInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly destinationWorkspaceId: string;
+}
+
 export interface RemoveWorktreeInput {
   readonly workspaceId: string;
   readonly worktreeId: string;
@@ -485,6 +510,11 @@ export interface DesktopAppState {
   readonly composerAttachments: readonly ComposerAttachment[];
   readonly queuedComposerMessages: readonly QueuedComposerMessage[];
   readonly editingQueuedMessageId?: string;
+  /**
+   * The sent user message the selected thread's composer is editing (its transcript row id).
+   * The thread is unchanged until the edit is sent; rows from this one down will be replaced.
+   */
+  readonly editingMessageId?: string;
   readonly runtimeByWorkspace: Readonly<Record<string, RuntimeSnapshot>>;
   readonly sessionCommandsBySession: Readonly<Record<string, readonly RuntimeCommandRecord[]>>;
   /** Context, cache and usage for open sessions; absent until pi reports it. */
@@ -503,9 +533,20 @@ export interface DesktopAppState {
    */
   readonly orchestrationChildren: readonly OrchestrationChildThread[];
   readonly childThreadLinks: readonly ChildThreadLink[];
+  /**
+   * Parents the user chose by dragging, by child session key: a parent's session key, or
+   * NO_THREAD_PARENT to keep the thread at the top level even when an agent started it.
+   * These win over childThreadLinks when the sidebar nests threads.
+   */
+  readonly threadParentOverrides: Readonly<Record<string, string>>;
   readonly scheduledTasks: readonly ScheduledTaskRecord[];
   readonly notificationPreferences: NotificationPreferences;
   readonly integratedTerminalShell: string;
+  /**
+   * Seconds a model request may go without output before pi-gui ends it as stalled and Pi
+   * retries it once; 0 turns that off.
+   */
+  readonly modelStallTimeoutSeconds: number;
   readonly lastViewedAtBySession: Readonly<Record<string, string>>;
   readonly lastInteractedAtBySession: Readonly<Record<string, string>>;
   readonly pinnedAtBySession: Readonly<Record<string, string>>;
@@ -556,13 +597,16 @@ export function createEmptyDesktopAppState(): DesktopAppState {
     extensionFlagsBySession: {},
     orchestrationChildren: [],
     childThreadLinks: [],
+    threadParentOverrides: {},
     scheduledTasks: [],
     notificationPreferences: {
       backgroundCompletion: true,
       backgroundFailure: true,
       attentionNeeded: true,
+      showReplyPreview: true,
     },
     integratedTerminalShell: "",
+    modelStallTimeoutSeconds: 120,
     lastViewedAtBySession: {},
     lastInteractedAtBySession: {},
     pinnedAtBySession: {},

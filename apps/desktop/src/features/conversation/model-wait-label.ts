@@ -33,9 +33,16 @@ export function modelWaitText(
     return { label, notes: [] };
   }
   const notes: string[] = [];
-  if (nowMs - Date.parse(wait.since) >= SLOW_FIRST_OUTPUT_MS) {
+  const waitedMs = nowMs - Date.parse(wait.since);
+  const stallAt = wait.request?.stallAt ? Date.parse(wait.request.stallAt) : Number.NaN;
+  if (waitedMs >= SLOW_FIRST_OUTPUT_MS) {
+    const untilStall = Math.ceil((stallAt - nowMs) / 1000);
     notes.push(
-      "No response yet. The provider may be slow or overloaded; you can stop and send again.",
+      Number.isNaN(stallAt)
+        ? "No response yet. The provider may be slow or overloaded; you can stop and send again."
+        : untilStall > 0
+          ? `No output yet. If nothing arrives in ${formatElapsedDuration(untilStall * 1000)}, pi-gui ends this request and retries it once.`
+          : "No output yet. Ending this request to retry it…",
     );
   }
   if (largeContext) {
@@ -46,11 +53,24 @@ export function modelWaitText(
         : `Large context (${tokens}), so the first response may take a while.`,
     );
   }
-  return { label: `Waiting for the model · ${elapsed}`, notes };
+  return { label: `${waitingFor(wait.request)} · ${elapsed}`, notes };
+}
+
+/**
+ * What the wait is on: the provider's response to the request, or the model's first output
+ * after the provider accepted it (with any keep-alive pings it sent meanwhile).
+ */
+function waitingFor(request: SessionModelWait["request"]): string {
+  if (!request) return "Waiting for the model";
+  if (request.phase === "sending") return "Waiting for the provider to respond";
+  const pings =
+    request.pings > 0 ? `, ${request.pings} keep-alive ping${request.pings === 1 ? "" : "s"}` : "";
+  return `Request accepted${pings}, waiting for the model`;
 }
 
 /** A short reason for a provider error, whose full text can be a JSON body. */
 export function retryReason(error: string): string {
+  if (/^The model stalled/.test(error)) return "no output from the model";
   if (/overload|\b529\b/i.test(error)) return "provider overloaded";
   if (/rate.?limit|\b429\b|too many requests/i.test(error)) return "rate limited";
   if (/time(d)?.?out/i.test(error)) return "timed out";

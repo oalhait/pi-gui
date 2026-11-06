@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { access, realpath, stat, unlink } from "node:fs/promises";
+import { access, realpath, rename, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ModelRegistry,
@@ -30,6 +30,7 @@ import type {
   CreateSessionOptions,
   ExtensionFlagValues,
   ForkSessionOptions,
+  MoveSessionOptions,
   ForkSessionResult,
   HostUiRequest,
   HostUiResponse,
@@ -134,6 +135,17 @@ import {
 } from "./connection-resume.js";
 import { createPlanLimitsExtension, readSessionUsage } from "./session-usage.js";
 import {
+  monitorStreamFunction,
+  shortError,
+  type ModelRequestDiagnostic,
+  type ModelRequestProgress,
+} from "./model-request-monitor.js";
+import {
+  DEFAULT_MODEL_STALL_TIMEOUT_MS,
+  type RunDiagnostic,
+  type RunLifecycleDiagnostic,
+} from "./run-diagnostics.js";
+import {
   createDesktopExtensionBridge,
   type PiDesktopExtensionObserver,
 } from "./desktop-extension-bridge.js";
@@ -206,6 +218,13 @@ export interface PiSdkDriverOptions {
     readonly policy?: ConnectionResumePolicy;
     readonly isOnline?: () => boolean;
   };
+  /**
+   * Ending a model request the provider accepted but never answers (see
+   * model-request-monitor.ts). Read at each request; 0 turns the detector off.
+   */
+  readonly modelStallTimeoutMs?: () => number;
+  /** Content-free metadata about each run and model request, for a diagnostics log. */
+  readonly onRunDiagnostic?: (diagnostic: RunDiagnostic) => void;
   readonly generateThreadTitleOverride?: (
     workspace: WorkspaceRef,
     options: import("./thread-title-generator.js").GenerateThreadTitleOptions,
@@ -314,6 +333,8 @@ interface ManagedSessionRecord {
     | undefined;
   /** The running turn has asked the model and nothing has streamed back yet. */
   modelWait: SessionModelWait | undefined;
+  /** Model requests in a row the stall detector ended with no output in between. */
+  consecutiveStalls: number;
 }
 
 type NotifyHostUiRequest = Extract<
@@ -370,6 +391,10 @@ export class SessionSupervisor {
   private readonly turnCaptureTimeoutMs: number | undefined;
   private readonly connectionResumePolicy: ConnectionResumePolicy;
   private readonly isNetworkOnline: (() => boolean) | undefined;
+  private readonly modelStallTimeoutMs: () => number;
+  private readonly onRunDiagnostic: ((diagnostic: RunDiagnostic) => void) | undefined;
+  /** Agents whose stream function already goes through the model request monitor. */
+  private readonly monitoredAgents = new WeakSet<object>();
   private readonly records = new Map<string, ManagedSessionRecord>();
   /** Latest plan limits a provider reported, shared by every session on that provider. */
   private readonly planLimitsByProvider = new Map<string, SessionPlanLimits>();
@@ -401,6 +426,9 @@ export class SessionSupervisor {
     this.connectionResumePolicy =
       options.connectionResume?.policy ?? DEFAULT_CONNECTION_RESUME_POLICY;
     this.isNetworkOnline = options.connectionResume?.isOnline;
+    this.modelStallTimeoutMs =
+      options.modelStallTimeoutMs ?? (() => DEFAULT_MODEL_STALL_TIMEOUT_MS);
+    this.onRunDiagnostic = options.onRunDiagnostic;
     this.agentDir = options.agentDir;
   }
 
@@ -954,11 +982,27 @@ export class SessionSupervisor {
       branchedManager = forked;
     }
 
-    const forkConfig = deriveSessionConfig(branchedManager);
+    const snapshot = await this.openRecordFromManager(
+      targetWorkspace,
+      branchedManager,
+      options.title ?? sourceRecord.title,
+      options.extensionFlagValues,
+    );
+    return selectedText === undefined ? { snapshot } : { snapshot, selectedText };
+  }
+
+  /** Binds a runtime to a session file already written in the target folder, as a new record. */
+  private async openRecordFromManager(
+    targetWorkspace: WorkspaceRef,
+    manager: SessionManager,
+    title: string,
+    extensionFlagValues: ForkSessionOptions["extensionFlagValues"],
+  ): Promise<SessionSnapshot> {
+    const forkConfig = deriveSessionConfig(manager);
     const forkProvider = forkConfig?.provider;
     const forkModelId = forkConfig?.modelId;
     const createOptions: PiCreateAgentSessionOptions = {
-      ...this.baseCreateOptions(targetWorkspace, branchedManager, options.extensionFlagValues),
+      ...this.baseCreateOptions(targetWorkspace, manager, extensionFlagValues),
       ...(forkProvider && forkModelId
         ? {
             // A model the source session used may not exist in the target
@@ -979,7 +1023,6 @@ export class SessionSupervisor {
     const runtime = await this.createAgentSessionRuntimeImpl(createOptions);
     const session = runtime.session;
 
-    const title = options.title ?? sourceRecord.title;
     const record = this.createRecord(targetWorkspace, runtime, title);
     forcePersistPiSession(session.sessionManager);
     record.config = deriveSessionConfig(session.sessionManager);
@@ -1000,7 +1043,69 @@ export class SessionSupervisor {
       timestamp: nowIso(),
       snapshot,
     });
-    return selectedText === undefined ? { snapshot } : { snapshot, selectedText };
+    return snapshot;
+  }
+
+  async moveSession(sourceRef: SessionRef, options: MoveSessionOptions): Promise<SessionSnapshot> {
+    const sourceRecord = await this.ensureRecord(sourceRef);
+    for (let write; (write = this.stopMarkWrites.get(sessionKey(sourceRecord.ref)));) await write;
+    const session = this.requireSession(sourceRecord);
+    // A failed thread can move; one with anything in flight cannot.
+    if (hasWorkInFlight(sourceRecord, session) || sourceRecord.status === "running") {
+      throw new Error("Only an idle thread can move. Wait for its run to finish, then try again.");
+    }
+    const sourceFile = sourceRecord.sessionFile ?? session.sessionManager.getSessionFile();
+    if (!sourceFile) {
+      throw new Error(`Thread ${sessionKey(sourceRef)} has no session file to move.`);
+    }
+    const targetWorkspace = options.targetWorkspace;
+    if (resolve(targetWorkspace.path) === resolve(sourceRecord.workspace.path)) {
+      throw new Error("The thread is already in that folder.");
+    }
+    if (this.records.has(sessionKey({ ...sourceRef, workspaceId: targetWorkspace.workspaceId }))) {
+      throw new Error("That folder already has a thread with this id.");
+    }
+
+    await this.registerWorkspaceRef(targetWorkspace);
+    // Same id, so the thread keeps its identity; pi writes the copy under the target folder.
+    const moved = SessionManager.forkFrom(sourceFile, targetWorkspace.path, undefined, {
+      id: sourceRef.sessionId,
+    });
+    const movedFile = moved.getSessionFile();
+    let snapshot: SessionSnapshot;
+    try {
+      snapshot = await this.openRecordFromManager(
+        targetWorkspace,
+        moved,
+        sourceRecord.title,
+        options.extensionFlagValues,
+      );
+    } catch (error) {
+      await removeIntermediateForkSession(movedFile, undefined);
+      throw error;
+    }
+
+    // Retire the original only once the copy is open. Its file is renamed, not deleted, so
+    // neither pi-gui nor pi lists it in the old folder and the bytes stay recoverable.
+    const key = sessionKey(sourceRecord.ref);
+    sourceRecord.unsubscribeAgent?.();
+    sourceRecord.unsubscribeAgent = undefined;
+    sourceRecord.listeners.clear();
+    await this.disposeRecordRuntimeSafely(sourceRecord);
+    this.records.delete(key);
+    await this.catalogs.sessions.deleteSession(sourceRecord.ref);
+    await this.catalogs.deleteSessionFile(sourceRecord.ref);
+    try {
+      await rename(sourceFile, `${sourceFile}.moved`);
+    } catch (error) {
+      // The copy is already in place; a failed rename only leaves the original listed too.
+      console.warn(
+        `[pi-sdk-driver] moved ${key} but could not set the original aside: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    return snapshot;
   }
 
   private async resolveForkSource(
@@ -1072,18 +1177,7 @@ export class SessionSupervisor {
     // fail) before the checks below; nothing awaits between the last one and the checks.
     for (let write; (write = this.stopMarkWrites.get(sessionKey(record.ref)));) await write;
     const session = this.requireSession(record);
-    if (
-      isRecordBusy(record) ||
-      record.runAwaitingSettle ||
-      record.status !== "idle" ||
-      record.queuedMessages.length > 0 ||
-      record.queuedStartScheduled ||
-      record.sendsSettling > 0 ||
-      record.queueStepsPending > 0 ||
-      session.pendingMessageCount > 0 ||
-      record.startingQueuedMessage ||
-      record.pendingHostUiRequests.size > 0
-    ) {
+    if (hasWorkInFlight(record, session) || record.status !== "idle") {
       throw new Error(
         "The thread is running, waiting, or has queued messages; it was not archived.",
       );
@@ -1181,6 +1275,7 @@ export class SessionSupervisor {
       // Stop can arrive from here on, before Pi has a run to abort.
       record.promptStarting = true;
     }
+    if (runId) this.runDiagnostic(record, { kind: "prompt_start" }, runId);
     record.runningRunId = runId ?? record.runningRunId;
     record.status = isQueuedMessage || isExtensionCommand ? record.status : "running";
     record.updatedAt = nowIso();
@@ -1521,6 +1616,7 @@ export class SessionSupervisor {
     }
 
     record.cancellationRequested = true;
+    this.runDiagnostic(record, { kind: "stop_requested" });
     if (record.runAwaitingSettle) record.stopBeforeSettle = true;
     // pi's abort waits for the settle boundary, where a connection wait would hold it.
     record.connectionResume?.controller?.abort();
@@ -1571,9 +1667,20 @@ export class SessionSupervisor {
     const policy = this.connectionResumePolicy;
     const delayMs = connectionResumeDelayMs(policy, resume.attempt, Date.now() - resume.startedAt);
     if (delayMs === undefined) {
+      this.runDiagnostic(record, {
+        kind: "connection_resume",
+        decision: "give_up",
+        reason: "budget spent",
+      });
       this.setConnectionRetry(record, undefined);
       return false;
     }
+    this.runDiagnostic(record, {
+      kind: "connection_resume_wait",
+      attempt: resume.attempt + 1,
+      delayMs,
+      error: shortError(errorMessage),
+    });
     const controller = new AbortController();
     resume.controller = controller;
     this.setConnectionRetry(record, {
@@ -1590,12 +1697,76 @@ export class SessionSupervisor {
     });
     resume.controller = undefined;
     if (outcome !== "resume" || record.closed || record.cancellationRequested) {
+      this.runDiagnostic(record, {
+        kind: "connection_resume",
+        decision: "give_up",
+        reason: outcome === "resume" ? "stopped" : outcome,
+      });
       this.setConnectionRetry(record, undefined);
       return false;
     }
+    this.runDiagnostic(record, { kind: "connection_resume", decision: "resume" });
     resume.attempt += 1;
     this.setConnectionRetry(record, { attempt: resume.attempt, error: errorMessage });
     return true;
+  }
+
+  /**
+   * Route the session's model requests through the request monitor: the runs log, the
+   * waiting line's request phase and the stall detector. Installed once per Pi agent.
+   */
+  private monitorModelRequests(record: ManagedSessionRecord, session: AgentSession): void {
+    const agent = session.agent;
+    if (this.monitoredAgents.has(agent)) return;
+    this.monitoredAgents.add(agent);
+    agent.streamFunction = monitorStreamFunction(agent.streamFunction, {
+      stallTimeoutMs: () => this.modelStallTimeoutMs(),
+      recordStall: () => (record.consecutiveStalls += 1),
+      resetStalls: () => {
+        record.consecutiveStalls = 0;
+      },
+      onProgress: (progress) => this.setModelRequestProgress(record, progress),
+      onFirstOutput: () => undefined,
+      onDiagnostic: (diagnostic) => this.runDiagnostic(record, diagnostic),
+    });
+  }
+
+  private setModelRequestProgress(
+    record: ManagedSessionRecord,
+    progress: ModelRequestProgress,
+  ): void {
+    // Only while the turn waits; a request after the first output (or a cache warm) is not shown.
+    if (!record.modelWait || record.modelWait.retry?.retryAt) return;
+    record.modelWait = {
+      ...record.modelWait,
+      request: {
+        phase: progress.phase,
+        ...(progress.status !== undefined ? { status: progress.status } : {}),
+        pings: progress.pings,
+        ...(progress.stallAt !== undefined
+          ? { stallAt: new Date(progress.stallAt).toISOString() }
+          : {}),
+      },
+    };
+    this.queueDriverEvents(record, [sessionUpdatedEvent(record)], { persistSnapshot: false });
+  }
+
+  private runDiagnostic(
+    record: ManagedSessionRecord,
+    diagnostic: ModelRequestDiagnostic | RunLifecycleDiagnostic,
+    runId = record.runningRunId,
+  ): void {
+    if (!this.onRunDiagnostic) return;
+    try {
+      this.onRunDiagnostic({
+        ...diagnostic,
+        sessionId: record.ref.sessionId,
+        workspaceId: record.ref.workspaceId,
+        ...(runId ? { runId } : {}),
+      });
+    } catch {
+      // Diagnostics never affect a run.
+    }
   }
 
   private setConnectionRetry(
@@ -2024,6 +2195,7 @@ export class SessionSupervisor {
       connectionRetry: undefined,
       connectionResume: undefined,
       modelWait: undefined,
+      consecutiveStalls: 0,
     };
     return record;
   }
@@ -2226,6 +2398,7 @@ export class SessionSupervisor {
     }
 
     record.session = session;
+    this.monitorModelRequests(record, session);
     // The old session's agent_settled will not reach this record any more.
     record.runAwaitingSettle = session.isStreaming;
     record.stopBeforeSettle = false;
@@ -2937,6 +3110,7 @@ export class SessionSupervisor {
           });
         }
         record.runningRunId ??= crypto.randomUUID();
+        this.runDiagnostic(record, { kind: "agent_start" });
         record.pendingRunOutcome = undefined;
         this.markStoppedReply(record, undefined);
         record.runAwaitingSettle = true;
@@ -2946,6 +3120,7 @@ export class SessionSupervisor {
         record.status = "running";
         // Pi asks the model next. A retry's backoff has ended once its turn starts.
         record.modelWait = { since: timestamp, ...retryWithoutBackoff(record.modelWait) };
+        this.runDiagnostic(record, { kind: "turn_start" });
         return [sessionUpdatedEvent(record)];
       case "message_start":
       case "message_end":
@@ -3060,9 +3235,11 @@ export class SessionSupervisor {
         this.refreshUsage(record);
         return [sessionUpdatedEvent(record)];
       case "compaction_start":
+        this.runDiagnostic(record, { kind: "compaction_start", reason: event.reason });
         record.status = "running";
         return [sessionUpdatedEvent(record)];
       case "compaction_end":
+        this.runDiagnostic(record, { kind: "compaction_end" });
         if (!isRecordBusy(record)) record.status = "idle";
         this.refreshUsage(record);
         return [sessionUpdatedEvent(record)];
@@ -3100,6 +3277,13 @@ export class SessionSupervisor {
         return [];
       case "auto_retry_start":
         // Pi backs off before retrying a transient failure (overloaded, rate limited, 5xx).
+        this.runDiagnostic(record, {
+          kind: "retry_backoff",
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          error: shortError(event.errorMessage),
+        });
         record.modelWait = {
           since: timestamp,
           retry: {
@@ -3112,6 +3296,12 @@ export class SessionSupervisor {
         return [sessionUpdatedEvent(record)];
       case "auto_retry_end":
         // A successful retry has already streamed; a failed or cancelled one ends the run.
+        this.runDiagnostic(record, {
+          kind: "retry_end",
+          attempt: event.attempt,
+          success: event.success,
+          ...(event.finalError ? { error: shortError(event.finalError) } : {}),
+        });
         record.modelWait = undefined;
         return [sessionUpdatedEvent(record)];
       case "agent_end": {
@@ -3137,6 +3327,12 @@ export class SessionSupervisor {
         record.connectionResume = undefined;
         record.connectionRetry = undefined;
         record.modelWait = undefined;
+        record.consecutiveStalls = 0;
+        this.runDiagnostic(record, {
+          kind: "run_end",
+          outcome: stopped ? "stopped" : (outcome?.status ?? "completed"),
+          aborted: Boolean(event.aborted),
+        });
         this.markStoppedReply(
           record,
           stopped && record.session
@@ -3618,6 +3814,21 @@ function clampThinkingLevel(level: string, availableLevels: readonly string[]): 
     }
   }
   return availableLevels[0] ?? "off";
+}
+
+/** A run, queue, pending send or open host dialog is in flight. */
+function hasWorkInFlight(record: ManagedSessionRecord, session: AgentSession): boolean {
+  return (
+    isRecordBusy(record) ||
+    record.runAwaitingSettle ||
+    record.queuedMessages.length > 0 ||
+    record.queuedStartScheduled ||
+    record.sendsSettling > 0 ||
+    record.queueStepsPending > 0 ||
+    session.pendingMessageCount > 0 ||
+    record.startingQueuedMessage !== undefined ||
+    record.pendingHostUiRequests.size > 0
+  );
 }
 
 async function createCanonicalWorkspaceRef(

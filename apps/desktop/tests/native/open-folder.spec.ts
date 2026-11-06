@@ -46,7 +46,8 @@ test("opens a folder from Cmd+O even when the composer is focused", async () => 
           );
           return {
             selectedPath: selectedWorkspace?.path ?? null,
-            workspaceCount: state.workspaces.length,
+            workspaceCount: state.workspaces.filter((workspace) => workspace.kind !== "chats")
+              .length,
           };
         },
         { timeout: 20_000 },
@@ -98,7 +99,8 @@ test("canceling the open-folder dialog from Cmd+O leaves workspace state unchang
             (workspace) => workspace.id === state.selectedWorkspaceId,
           );
           return {
-            workspaceCount: state.workspaces.length,
+            workspaceCount: state.workspaces.filter((workspace) => workspace.kind !== "chats")
+              .length,
             selectedPath: selectedWorkspace?.path ?? null,
             emptyStateVisible: await window
               .getByTestId("empty-state")
@@ -109,7 +111,7 @@ test("canceling the open-folder dialog from Cmd+O leaves workspace state unchang
         { timeout: 20_000 },
       )
       .toEqual({
-        workspaceCount: before.workspaces.length,
+        workspaceCount: before.workspaces.filter((workspace) => workspace.kind !== "chats").length,
         selectedPath: selectedBefore?.path ?? null,
         emptyStateVisible: false,
       });

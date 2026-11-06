@@ -425,6 +425,8 @@ export function useTimelineViewport({
     [paneRef, schedule],
   );
   return {
+    /** Every display row, in order, including those outside the visible range. */
+    rows,
     totalHeight,
     visibleRows: placements,
     layoutGeneration: current.generation,

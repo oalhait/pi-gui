@@ -48,6 +48,8 @@ interface ComposerSurfaceProps {
   readonly attachments: readonly ComposerAttachment[];
   readonly queuedMessages: readonly import("../../../contracts/desktop-state").QueuedComposerMessage[];
   readonly editingQueuedMessageId?: string;
+  /** Set while the composer edits a sent message; cancelling leaves the thread as it was. */
+  readonly onCancelMessageEdit?: (() => void) | undefined;
   readonly slashSections: readonly ComposerSlashCommandSection[];
   readonly slashOptions: readonly ComposerSlashOption[];
   readonly selectedSlashCommand?: ComposerSlashCommand;
@@ -98,6 +100,7 @@ export function ComposerSurface({
   attachments,
   queuedMessages,
   editingQueuedMessageId,
+  onCancelMessageEdit,
   slashSections,
   slashOptions,
   selectedSlashCommand,
@@ -176,6 +179,20 @@ export function ComposerSurface({
     onComposerDrop(event);
   };
 
+  // Esc in the text box cancels a message edit, once an open menu has taken (and prevented) it.
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key !== "Escape" ||
+      !onCancelMessageEdit ||
+      event.target !== composerRef.current ||
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing
+    )
+      return;
+    event.preventDefault();
+    onCancelMessageEdit();
+  };
+
   return (
     <div
       className={`composer__surface ${isDragActive ? "composer__surface--drag-active" : ""}`}
@@ -185,6 +202,7 @@ export function ComposerSurface({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onKeyDown={handleKeyDown}
     >
       {isDragActive ? (
         <div className="composer__drop-indicator" data-testid="composer-drop-indicator">
@@ -209,6 +227,15 @@ export function ComposerSurface({
             onClick={onClearSlashCommand}
           >
             ×
+          </button>
+        </div>
+      ) : null}
+      {onCancelMessageEdit ? (
+        <div className="composer__message-edit" data-testid="composer-message-edit">
+          <span>Editing an earlier message</span>
+          <span aria-hidden="true">·</span>
+          <button type="button" title="Cancel editing (Esc)" onClick={onCancelMessageEdit}>
+            Cancel
           </button>
         </div>
       ) : null}

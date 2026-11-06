@@ -47,6 +47,7 @@ import { deriveModelOnboardingState } from "../features/settings/model-onboardin
 import type { SettingsSection } from "../features/settings/settings-view";
 import { SecondarySurfaces } from "./secondary-surfaces";
 import { NewThreadView } from "../features/threads/new-thread-view";
+import { MoveThreadDialogHost } from "../features/threads/move-thread-dialog";
 import {
   buildThreadSidebarModel,
   sessionThreadKey,
@@ -485,6 +486,7 @@ export default function App() {
     editFromMessage,
     editError,
     dismissEditError,
+    cancelMessageEdit,
     handleForkSubmit,
     canUseWorktree,
   } = useTreeForkModals({
@@ -495,8 +497,8 @@ export default function App() {
     selectedSession,
     selectedSessionKey,
     rootWorkspace,
-    activeView: snapshot?.activeView,
     setComposerDraft,
+    flushComposerDraft,
     focusComposer,
   });
 
@@ -1023,7 +1025,8 @@ export default function App() {
           panelAvailable={sidePanelAvailable}
           panelVisible={sidePanelVisible}
           editorControl={
-            selectedWorkspace ? (
+            // Chats live in pi-gui's own folder, not one the user works in.
+            selectedWorkspace && selectedWorkspace.kind !== "chats" ? (
               <OpenInEditorButton state={openInEditor} onOpenFolder={openSelectedWorkspaceFolder} />
             ) : undefined
           }
@@ -1073,8 +1076,8 @@ export default function App() {
           ) : snapshot.activeView === "new-thread" ? (
             rootWorkspaceOptions.length > 0 ? (
               <NewThreadView
-                workspaces={rootWorkspaceOptions}
-                selectedWorkspaceId={newThread.rootWorkspaceId || rootWorkspaceOptions[0]?.id || ""}
+                workspace={newThread.workspace}
+                destinations={rootWorkspaceOptions}
                 runtime={newThread.runtime}
                 environment={newThread.environment}
                 prompt={newThread.prompt}
@@ -1177,6 +1180,7 @@ export default function App() {
                     extensionToolLabels={extensionToolLabels}
                     workspacePath={selectedWorkspace.path}
                     onEditFromMessage={editFromMessage}
+                    editingMessageId={snapshot.editingMessageId}
                     onForkFromMessage={
                       selectedSession.status === "running" ? undefined : openForkModal
                     }
@@ -1195,12 +1199,14 @@ export default function App() {
               ) : null}
               <ComposerPanel
                 key={selectedSessionKey}
+                topLevelChat={selectedWorkspace.kind === "chats"}
                 preparingTaskDraft={extensionHostActions.preparingTaskDraft}
                 activeSlashCommand={slashMenu.activeSlashFlow?.command}
                 activeSlashCommandMeta={slashMenu.activeSlashFlow?.command?.description}
                 attachments={composerAttachments}
                 queuedMessages={queuedComposerMessages}
                 editingQueuedMessageId={editingQueuedMessageId}
+                onCancelMessageEdit={cancelMessageEdit}
                 composerDraft={composerDraft}
                 composerRef={composerRef}
                 runtime={selectedModelRuntime}
@@ -1430,6 +1436,7 @@ export default function App() {
           onOpenChat={handleOpenScheduledChat}
         />
       ) : null}
+      <MoveThreadDialogHost threadMenu={threadMenu} destinations={rootWorkspaceOptions} />
       {threadSwitcher.state?.overlayVisible ? (
         <ThreadSwitcher state={threadSwitcher.state} onChoose={threadSwitcher.choose} />
       ) : null}

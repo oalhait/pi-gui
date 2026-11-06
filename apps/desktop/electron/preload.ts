@@ -1,5 +1,10 @@
 import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "../contracts/workbench-agent";
 import type {
+  RemoteHostConfig,
+  RemoteHostState,
+  RemoteHostTestResult,
+} from "../contracts/remote-hosts";
+import type {
   BrowserAction,
   BrowserLayout,
   BrowserMount,
@@ -74,6 +79,8 @@ import type {
   CreateWorktreeInput,
   DesktopAppState,
   ForkThreadInput,
+  MoveThreadInput,
+  SetThreadParentInput,
   NotificationPreferences,
   RemoveWorktreeInput,
   SendChildThreadFollowUpInput,
@@ -327,6 +334,10 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.invoke(desktopIpc.startThread, input) as Promise<DesktopAppState>,
   forkThread: (input: ForkThreadInput) =>
     ipcRenderer.invoke(desktopIpc.forkThread, input) as Promise<DesktopAppState>,
+  moveThread: (input: MoveThreadInput) =>
+    ipcRenderer.invoke(desktopIpc.moveThread, input) as Promise<DesktopAppState>,
+  setThreadParent: (input: SetThreadParentInput) =>
+    ipcRenderer.invoke(desktopIpc.setThreadParent, input) as Promise<DesktopAppState>,
   sendChildThreadFollowUp: (input: SendChildThreadFollowUpInput) =>
     ipcRenderer.invoke(desktopIpc.sendChildThreadFollowUp, input) as Promise<DesktopAppState>,
   setChildSupervisionLoop: (input: SetChildSupervisionLoopInput) =>
@@ -500,6 +511,8 @@ contextBridge.exposeInMainWorld("piApp", {
       desktopIpc.setIntegratedTerminalShell,
       shellPath,
     ) as Promise<DesktopAppState>,
+  setModelStallTimeout: (seconds: number) =>
+    ipcRenderer.invoke(desktopIpc.setModelStallTimeout, seconds) as Promise<DesktopAppState>,
   setEnableTransparency: (enabled: boolean) =>
     ipcRenderer.invoke(desktopIpc.setEnableTransparency, enabled) as Promise<DesktopAppState>,
   setThemePresetId: (presetId: ThemePresetId) =>
@@ -648,11 +661,10 @@ contextBridge.exposeInMainWorld("piApp", {
       readonly state: DesktopAppState;
       readonly result: NavigateSessionTreeResult;
     }>,
-  rewindToMessage: (target: WorkspaceSessionTarget, sourceMessageId: string) =>
-    ipcRenderer.invoke(desktopIpc.rewindToMessage, target, sourceMessageId) as Promise<{
-      readonly state: DesktopAppState;
-      readonly result: NavigateSessionTreeResult;
-    }>,
+  startMessageEdit: (messageId: string) =>
+    ipcRenderer.invoke(desktopIpc.startMessageEdit, messageId) as Promise<DesktopAppState>,
+  cancelMessageEdit: () =>
+    ipcRenderer.invoke(desktopIpc.cancelMessageEdit) as Promise<DesktopAppState>,
   listWorkspaceFiles: (workspaceId: string, options?: { readonly force?: boolean }) =>
     ipcRenderer.invoke(desktopIpc.listWorkspaceFiles, workspaceId, options) as Promise<string[]>,
   readWorkspaceFile: (workspaceId: string, filePath: string) =>
@@ -705,4 +717,24 @@ contextBridge.exposeInMainWorld("piApp", {
     };
   },
   relaunchApplication: () => ipcRenderer.invoke(desktopIpc.relaunchApplication) as Promise<void>,
+  listRemoteHosts: () =>
+    ipcRenderer.invoke(desktopIpc.listRemoteHosts) as Promise<readonly RemoteHostState[]>,
+  saveRemoteHost: (config: RemoteHostConfig) =>
+    ipcRenderer.invoke(desktopIpc.saveRemoteHost, config) as Promise<readonly RemoteHostState[]>,
+  removeRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.removeRemoteHost, hostId) as Promise<readonly RemoteHostState[]>,
+  testRemoteHost: (config: RemoteHostConfig) =>
+    ipcRenderer.invoke(desktopIpc.testRemoteHost, config) as Promise<RemoteHostTestResult>,
+  reconnectRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.reconnectRemoteHost, hostId) as Promise<void>,
+  restartRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.restartRemoteHost, hostId) as Promise<void>,
+  onRemoteHostsChanged: (listener: (hosts: readonly RemoteHostState[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, hosts: readonly RemoteHostState[]) =>
+      listener(hosts);
+    ipcRenderer.on(desktopIpc.remoteHostsChanged, handler);
+    return () => {
+      ipcRenderer.removeListener(desktopIpc.remoteHostsChanged, handler);
+    };
+  },
 } satisfies PiDesktopApi);

@@ -34,6 +34,12 @@
   display: flow-root;
 }
 
+/* Rows an edit in the composer will replace: still readable, clearly on their way out. */
+.timeline__virtual-row--superseded .timeline__virtual-row-content {
+  opacity: 0.4;
+  transition: opacity 160ms ease;
+}
+
 .timeline-pane {
   width: 100%;
   min-height: 420px;

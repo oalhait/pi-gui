@@ -1,4 +1,5 @@
 import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "./workbench-agent";
+import type { RemoteHostConfig, RemoteHostState, RemoteHostTestResult } from "./remote-hosts";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -46,6 +47,8 @@ import type {
   CreateWorktreeInput,
   DesktopAppState,
   ForkThreadInput,
+  MoveThreadInput,
+  SetThreadParentInput,
   ModelSettingsScopeMode,
   NotificationPreferences,
   RemoveWorktreeInput,
@@ -172,6 +175,8 @@ export const desktopIpc = {
   createSession: "pi-gui:create-session",
   startThread: "pi-gui:start-thread",
   forkThread: "pi-gui:fork-thread",
+  moveThread: "pi-gui:move-thread",
+  setThreadParent: "pi-gui:set-thread-parent",
   sendChildThreadFollowUp: "pi-gui:send-child-thread-follow-up",
   setChildSupervisionLoop: "pi-gui:set-child-supervision-loop",
   createScheduledTask: "pi-gui:create-scheduled-task",
@@ -209,6 +214,7 @@ export const desktopIpc = {
   respondToHostUiRequest: "pi-gui:respond-to-host-ui-request",
   setNotificationPreferences: "pi-gui:set-notification-preferences",
   setIntegratedTerminalShell: "pi-gui:set-integrated-terminal-shell",
+  setModelStallTimeout: "pi-gui:set-model-stall-timeout",
   setEnableTransparency: "pi-gui:set-enable-transparency",
   terminalEnsurePanel: "pi-gui:terminal-ensure-panel",
   terminalGetPanel: "pi-gui:terminal-get-panel",
@@ -243,7 +249,8 @@ export const desktopIpc = {
   submitComposer: "pi-gui:submit-composer",
   getSessionTree: "pi-gui:get-session-tree",
   navigateSessionTree: "pi-gui:navigate-session-tree",
-  rewindToMessage: "pi-gui:rewind-to-message",
+  startMessageEdit: "pi-gui:start-message-edit",
+  cancelMessageEdit: "pi-gui:cancel-message-edit",
   toggleWindowMaximize: "pi-gui:toggle-window-maximize",
   minimizeWindow: "pi-gui:minimize-window",
   closeWindow: "pi-gui:close-window",
@@ -270,6 +277,13 @@ export const desktopIpc = {
   ping: "app:ping",
   openExternal: "app:open-external",
   relaunchApplication: "pi-gui:relaunch-application",
+  listRemoteHosts: "pi-gui:list-remote-hosts",
+  saveRemoteHost: "pi-gui:save-remote-host",
+  removeRemoteHost: "pi-gui:remove-remote-host",
+  testRemoteHost: "pi-gui:test-remote-host",
+  reconnectRemoteHost: "pi-gui:reconnect-remote-host",
+  restartRemoteHost: "pi-gui:restart-remote-host",
+  remoteHostsChanged: "pi-gui:remote-hosts-changed",
 } as const;
 
 export const desktopCommands = {
@@ -821,6 +835,10 @@ export interface PiDesktopApi {
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;
   startThread(input: StartThreadInput): Promise<DesktopAppState>;
   forkThread(input: ForkThreadInput): Promise<DesktopAppState>;
+  /** Moves an idle thread to another project folder or out of any folder; history comes along. */
+  moveThread(input: MoveThreadInput): Promise<DesktopAppState>;
+  /** Nests a thread under another in the sidebar, or with no parent back at the top level. */
+  setThreadParent(input: SetThreadParentInput): Promise<DesktopAppState>;
   sendChildThreadFollowUp(input: SendChildThreadFollowUpInput): Promise<DesktopAppState>;
   setChildSupervisionLoop(input: SetChildSupervisionLoopInput): Promise<DesktopAppState>;
   createScheduledTask(input: CreateScheduledTaskInput): Promise<DesktopAppState>;
@@ -899,6 +917,7 @@ export interface PiDesktopApi {
     preferences: Partial<NotificationPreferences>,
   ): Promise<DesktopAppState>;
   setIntegratedTerminalShell(shell: string): Promise<DesktopAppState>;
+  setModelStallTimeout(seconds: number): Promise<DesktopAppState>;
   setEnableTransparency(enabled: boolean): Promise<DesktopAppState>;
   setThemePresetId(presetId: ThemePresetId): Promise<DesktopAppState>;
   ensureTerminalPanel(
@@ -969,11 +988,13 @@ export interface PiDesktopApi {
     targetId: string,
     options?: NavigateSessionTreeOptions,
   ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
-  /** Rewinds the thread to just before a sent user message so it can be edited and rerun. */
-  rewindToMessage(
-    target: WorkspaceSessionTarget,
-    sourceMessageId: string,
-  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
+  /**
+   * Puts a sent user message (by row or session entry id) in the selected thread's composer for
+   * editing. The thread is not rewound until the edit is sent; Cancel gives back the saved draft.
+   */
+  startMessageEdit(messageId: string): Promise<DesktopAppState>;
+  /** Leaves message editing with the thread untouched and the earlier draft back. */
+  cancelMessageEdit(): Promise<DesktopAppState>;
   listWorkspaceFiles(
     workspaceId: string,
     options?: { readonly force?: boolean },
@@ -1013,4 +1034,14 @@ export interface PiDesktopApi {
   /** The window came back to the foreground, so outside changes (edits, git) may need rereading. */
   onWindowFocused(listener: () => void): () => void;
   relaunchApplication(): Promise<void>;
+  listRemoteHosts(): Promise<readonly RemoteHostState[]>;
+  /** Adds a host, or replaces the one with the same id, and connects to it. */
+  saveRemoteHost(config: RemoteHostConfig): Promise<readonly RemoteHostState[]>;
+  /** Forgets a host here. Its server, chats and files stay on the server. */
+  removeRemoteHost(hostId: string): Promise<readonly RemoteHostState[]>;
+  testRemoteHost(config: RemoteHostConfig): Promise<RemoteHostTestResult>;
+  reconnectRemoteHost(hostId: string): Promise<void>;
+  /** Restarts the host's server, interrupting chats running there. */
+  restartRemoteHost(hostId: string): Promise<void>;
+  onRemoteHostsChanged(listener: (hosts: readonly RemoteHostState[]) => void): () => void;
 }

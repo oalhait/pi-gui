@@ -22,7 +22,8 @@ import {
 } from "electron";
 import { isValidHttpBaseUrl, type ConnectionResumePolicy } from "@pi-gui/pi-sdk-driver";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type {
   AgentToolResult,
   ExtensionContext,
@@ -50,6 +51,10 @@ import { performExtensionViewHostAction } from "./extensions/extension-view-acti
 import { extensionFrameDocument } from "./extensions/extension-frame-document";
 import { ReviewOwner } from "./workbench/review-owner";
 import { registerDesktopIpc } from "./ipc/register-desktop-ipc";
+import { RemoteHosts } from "./remote/remote-hosts";
+import { RemoteHostStore } from "./remote/remote-host-store";
+import { localCommandRunner, sshCommandRunner } from "./remote/remote-commands";
+import { findHostBundle } from "./remote/host-bundle";
 import {
   createOrchestrationRuntimeExtension,
   createOrchestrationRuntimeTools,
@@ -75,6 +80,7 @@ import { ThemeManager } from "./platform/theme-manager";
 import { EditorService } from "./platform/editors/editor-service";
 import { windowBackgroundFor } from "../contracts/theme";
 import { TerminalService } from "./platform/terminal-service";
+import { RunsLog } from "./platform/runs-log";
 import type { DesktopAppState, DesktopAppViewState } from "../contracts/desktop-state";
 import {
   desktopCommands,
@@ -157,6 +163,7 @@ const windowTestMode = appTestMode ?? "foreground";
 const devReloadMarkersEnabled = process.env.PI_APP_DEV_RELOAD_MARKERS === "1";
 const TURN_CAPTURE_BACKSTOP_MS = 10_000;
 let store: DesktopAppStore;
+let remoteHosts: RemoteHosts | undefined;
 let extensionViewOwner: DesktopExtensionViewOwner | undefined;
 let windowOwner: WindowOwner;
 const themeManager = new ThemeManager();
@@ -774,6 +781,24 @@ function testConnectionResumePolicy(): { policy?: ConnectionResumePolicy } {
   return { policy: { delaysMs, budgetMs: 60_000, onlinePollMs: 100 } };
 }
 
+/** Core tests shorten the stall detector; `PI_APP_TEST_MODEL_STALL_MS=1500`. */
+function testModelStallTimeout(): { modelStallTimeoutMs?: () => number } {
+  const ms = appTestMode ? Number(process.env.PI_APP_TEST_MODEL_STALL_MS) : Number.NaN;
+  return Number.isFinite(ms) && ms >= 0 ? { modelStallTimeoutMs: () => ms } : {};
+}
+
+/**
+ * ~/Library/Logs/pi-gui on macOS, Electron's logs folder elsewhere; tests keep it in their
+ * userData. See platform/runs-log.ts.
+ */
+function runsLogDirectory(userDataDir: string): string {
+  if (appTestMode) return path.join(userDataDir, "logs");
+  if (process.platform === "darwin") {
+    return path.join(app.getPath("home"), "Library", "Logs", "pi-gui");
+  }
+  return app.getPath("logs");
+}
+
 function resolveAppTestMode(value: string | undefined): "foreground" | "background" | undefined {
   return value === "foreground" || value === "background" ? value : undefined;
 }
@@ -1069,6 +1094,7 @@ app
     const orchestrationRuntimeBridge = createStoreBackedOrchestrationRuntimeBridge();
     const scheduledTaskRuntimeBridge = createStoreBackedScheduledTaskRuntimeBridge();
     const checkpoints = new TurnCheckpointStore(configuredUserDataDir);
+    const runsLog = new RunsLog({ directory: runsLogDirectory(configuredUserDataDir) });
     const extensionViews: DesktopExtensionViewOwner = new DesktopExtensionViewOwner({
       frameDocument: extensionFrameDocument,
       hostAssets: {
@@ -1120,6 +1146,9 @@ app
         isOnline: () => net.isOnline(),
         ...testConnectionResumePolicy(),
       },
+      // Metadata about each run and model request, for explaining a stuck "Waiting for the model".
+      onRunDiagnostic: (diagnostic) => runsLog.record(diagnostic),
+      ...testModelStallTimeout(),
       desktopExtensions: {
         onChanged: (runtime) => extensionViews.replaceRuntime(runtime),
         onInvalidated: ({ target, generation }) =>
@@ -1162,8 +1191,51 @@ app
         },
       ],
     };
+    const broadcastRemoteHosts = (hosts: ReturnType<RemoteHosts["states"]>) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.send(desktopIpc.remoteHostsChanged, hosts);
+        }
+      }
+    };
+    remoteHosts = new RemoteHosts({
+      store: new RemoteHostStore(configuredUserDataDir),
+      // PI_GUI_REMOTE_TRANSPORT=local runs the server-side scripts on this computer (tests).
+      runner:
+        process.env.PI_GUI_REMOTE_TRANSPORT === "local" ? localCommandRunner : sshCommandRunner,
+      // PI_GUI_HOST_BUNDLE_DIR replaces the default locations (tests point it at none).
+      bundle: await findHostBundle(
+        process.env.PI_GUI_HOST_BUNDLE_DIR
+          ? [process.env.PI_GUI_HOST_BUNDLE_DIR]
+          : app.isPackaged
+            ? [path.join(process.resourcesPath, "pi-gui-host")]
+            : [path.resolve(app.getAppPath(), "../../packages/pi-gui-host/bundle")],
+      ),
+      client: {
+        // Stable per installation, so the host can tell a reconnect from a new client.
+        id: createHash("sha256")
+          .update(`${hostname()}\0${configuredUserDataDir}`)
+          .digest("hex")
+          .slice(0, 16),
+        name: `pi-gui on ${hostname()}`,
+        version: app.getVersion(),
+      },
+      onStateChanged: broadcastRemoteHosts,
+      onResynced: (hostId) => {
+        store?.resyncRemoteHost(hostId).catch((error: unknown) => {
+          console.error(`[main] resync after reconnecting to ${hostId} failed`, error);
+        });
+      },
+      onCatalogChanged: () => {
+        store?.refreshRemoteCatalog().catch((error: unknown) => {
+          console.error("[main] refreshing remote folders failed", error);
+        });
+      },
+    });
+    await remoteHosts.initialize();
     store = new DesktopAppStore({
       userDataDir: configuredUserDataDir,
+      remoteHosts,
       initialWorkspacePaths: resolveInitialWorkspacePaths(),
       getWindow: () => mainWindow,
       shouldKeepSessionDialogs: (sessionRef) =>
@@ -1381,6 +1453,7 @@ app
         getFileDiff,
         stageFile,
         relaunchApplication: requestApplicationRelaunch,
+        remoteHosts: () => remoteHosts!,
       },
     });
 
@@ -1437,6 +1510,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  // Only the connections: chats keep running on each host's server.
+  remoteHosts?.disposeAll();
   stopNotifications?.();
   stopNotifications = undefined;
   notificationManager = undefined;

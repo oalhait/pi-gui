@@ -39,6 +39,8 @@ import type { ExtensionDockModel } from "../extensions/extension-session-ui";
 
 interface ComposerPanelProps {
   readonly preparingTaskDraft?: boolean;
+  /** A top-level chat has no repository, so the placeholder doesn't mention one. */
+  readonly topLevelChat?: boolean;
   readonly selectedSession: SessionRecord;
   readonly lastError?: string;
   readonly onDismissError?: (() => void) | undefined;
@@ -54,6 +56,8 @@ interface ComposerPanelProps {
   readonly attachments: readonly ComposerAttachment[];
   readonly queuedMessages: readonly QueuedComposerMessage[];
   readonly editingQueuedMessageId?: string;
+  /** Set while the composer edits a sent message. */
+  readonly onCancelMessageEdit?: (() => void) | undefined;
   readonly provider: string | undefined;
   readonly modelId: string | undefined;
   readonly thinkingLevel: string | undefined;
@@ -100,6 +104,7 @@ interface ComposerPanelProps {
 
 export function ComposerPanel({
   preparingTaskDraft = false,
+  topLevelChat = false,
   selectedSession,
   lastError,
   onDismissError,
@@ -114,6 +119,7 @@ export function ComposerPanel({
   attachments,
   queuedMessages,
   editingQueuedMessageId,
+  onCancelMessageEdit,
   provider,
   modelId,
   thinkingLevel,
@@ -180,6 +186,7 @@ export function ComposerPanel({
           attachments={attachments}
           queuedMessages={queuedMessages}
           editingQueuedMessageId={editingQueuedMessageId}
+          onCancelMessageEdit={onCancelMessageEdit}
           slashSections={slashSections}
           slashOptions={slashOptions}
           selectedSlashCommand={selectedSlashCommand}
@@ -205,7 +212,11 @@ export function ComposerPanel({
           onEnableMentionExtension={onEnableMentionExtension}
           textareaLabel="Composer"
           textareaTestId="composer"
-          textareaPlaceholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
+          textareaPlaceholder={
+            topLevelChat
+              ? "Ask a follow-up..."
+              : "Ask pi to inspect the repo, run a fix, or continue the current thread..."
+          }
           pinnedCards={pinnedCards}
           extensionDock={extensionDock}
           extensionDockExpanded={extensionDockExpanded}

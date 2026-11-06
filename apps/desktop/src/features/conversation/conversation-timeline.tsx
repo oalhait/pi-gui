@@ -21,6 +21,7 @@ import { useAnnotationSelection } from "./annotations/annotation-selection";
 import type { TranscriptAnnotations } from "./annotations/use-transcript-annotations";
 import { ThreadSearchBar } from "./thread-search";
 import type { RunExtensionAction } from "./extension-card";
+import { supersededRowIds } from "./message-edit-rows";
 import { TimelineItem } from "./timeline-item";
 import { sameRowContent, type TimelineRow } from "./timeline-layout";
 import { useThinkingDisplay, type ThinkingDisplay } from "./thinking-display";
@@ -50,6 +51,8 @@ interface ConversationTimelineProps {
   readonly onViewFileInDiff?: (path: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
   readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
+  /** The sent message the composer is editing; it and later rows are shown faded. */
+  readonly editingMessageId?: string;
   readonly onForkFromMessage?: (messageIndex: number, preview?: string) => void;
   readonly onOpenWorkspaceFileLine?: (target: WorkspaceFileLine) => void;
   readonly onExtensionAction?: RunExtensionAction;
@@ -74,6 +77,7 @@ export function ConversationTimeline({
   onOpenTurnChange,
   onForkFromMessage,
   onEditFromMessage,
+  editingMessageId,
   onOpenWorkspaceFileLine,
   onExtensionAction,
   extensionToolLabels,
@@ -141,6 +145,10 @@ export function ConversationTimeline({
       return new Map([...current].filter(([id]) => available.has(id)));
     });
   }, [transcript]);
+  const supersededRows = useMemo(
+    () => supersededRowIds(viewport.rows, editingMessageId),
+    [viewport.rows, editingMessageId],
+  );
   const renderedMessageIndexById = useMemo(() => {
     const indices = new Map<string, number>();
     let index = 0;
@@ -196,7 +204,11 @@ export function ConversationTimeline({
                     item={item}
                     offset={top - rowBottom(rows[index - 1])}
                     height={height}
-                    className="timeline__virtual-row"
+                    className={
+                      supersededRows.has(item.id)
+                        ? "timeline__virtual-row timeline__virtual-row--superseded"
+                        : "timeline__virtual-row"
+                    }
                     onHeightChange={viewport.measureRow}
                     generation={viewport.layoutGeneration}
                     expandedToolCallIds={expandedToolCallIds}
@@ -478,6 +490,9 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
       a.modelWait?.since === b.modelWait?.since &&
       a.modelWait?.retry?.attempt === b.modelWait?.retry?.attempt &&
       a.modelWait?.retry?.retryAt === b.modelWait?.retry?.retryAt &&
+      a.modelWait?.request?.phase === b.modelWait?.request?.phase &&
+      a.modelWait?.request?.pings === b.modelWait?.request?.pings &&
+      a.modelWait?.request?.stallAt === b.modelWait?.request?.stallAt &&
       a.largeContext?.tokens === b.largeContext?.tokens &&
       a.largeContext?.cacheExpired === b.largeContext?.cacheExpired
     );

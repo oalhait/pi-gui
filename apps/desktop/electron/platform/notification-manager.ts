@@ -8,6 +8,12 @@ import { sessionKey } from "@pi-gui/session-driver";
 import type { SessionDriverEvent, SessionRef } from "@pi-gui/session-driver";
 import { getSelectedSession } from "../../contracts/desktop-state";
 import { isSessionActivelyViewed } from "../conversation/session-visibility";
+import {
+  completionNotificationBody,
+  failureNotificationBody,
+  finalRunReplyText,
+  GENERIC_COMPLETION_BODY,
+} from "./notification-preview";
 
 const MAX_COMPLETED_RUN_KEYS = 500;
 // An extension that throws on a frequent event repeats the same error notice; notify once per window.
@@ -17,6 +23,8 @@ export class NotificationManager {
   private readonly completedRunKeys = new Set<string>();
   private readonly activeBySession = new Map<string, Electron.Notification>();
   private readonly lastNoticeBySession = new Map<string, { notice: string; at: number }>();
+  /** When each session's current run started, so its notification previews only that run's reply. */
+  private readonly runStartBySession = new Map<string, { runId: string; startedAt: string }>();
   private latestState: DesktopAppState | undefined;
   private trackedWindow: BrowserWindow | null = null;
   private stopTrackingWindow: (() => void) | undefined;
@@ -125,6 +133,7 @@ export class NotificationManager {
     if (event.type === "sessionClosed") {
       this.lastNoticeBySession.delete(sessionKey(event.sessionRef));
     }
+    const runStartedAt = this.trackRunStart(event);
     if (!Notification.isSupported()) {
       return;
     }
@@ -150,7 +159,9 @@ export class NotificationManager {
       await this.showNotification(
         event.sessionRef,
         event.snapshot.title,
-        "Agent finished responding",
+        this.showReplyPreview()
+          ? completionNotificationBody(this.runReplyText(event.sessionRef, runStartedAt))
+          : GENERIC_COMPLETION_BODY,
       );
       return;
     }
@@ -159,7 +170,10 @@ export class NotificationManager {
       await this.showNotification(
         event.sessionRef,
         this.titleForSession(event.sessionRef),
-        event.error.message,
+        failureNotificationBody(
+          event.error.message,
+          this.showReplyPreview() ? this.runReplyText(event.sessionRef, runStartedAt) : undefined,
+        ),
       );
       return;
     }
@@ -174,6 +188,39 @@ export class NotificationManager {
         hostUiBody(event),
       );
     }
+  }
+
+  /**
+   * Records a run's start and, when the run ends (or the session closes), returns and forgets
+   * it. A Stop settles a run with an idle update and no runCompleted, so a new run id resets it.
+   */
+  private trackRunStart(event: SessionDriverEvent): string | undefined {
+    const key = sessionKey(event.sessionRef);
+    if (event.type === "sessionUpdated") {
+      const runId = event.snapshot.status === "running" ? event.snapshot.runningRunId : undefined;
+      if (runId && this.runStartBySession.get(key)?.runId !== runId) {
+        this.runStartBySession.set(key, { runId, startedAt: event.timestamp });
+      }
+      return undefined;
+    }
+    if (
+      event.type === "runCompleted" ||
+      event.type === "runFailed" ||
+      event.type === "sessionClosed"
+    ) {
+      const start = this.runStartBySession.get(key);
+      this.runStartBySession.delete(key);
+      return start && (!event.runId || start.runId === event.runId) ? start.startedAt : undefined;
+    }
+    return undefined;
+  }
+
+  private showReplyPreview(): boolean {
+    return this.latestState?.notificationPreferences.showReplyPreview ?? true;
+  }
+
+  private runReplyText(sessionRef: SessionRef, runStartedAt: string | undefined) {
+    return finalRunReplyText(this.store.getSessionTranscript(sessionRef), runStartedAt);
   }
 
   /** A notice never replaces a waiting dialog's notification, and a repeated notice notifies once. */
@@ -317,12 +364,15 @@ export class NotificationManager {
     body: string,
   ): Promise<void> {
     this.dismissForSession(sessionRef);
-    await this.logNotification(sessionRef, title, body);
+    // Title is the thread; the subtitle (shown on macOS) names its project.
+    const subtitle = this.projectNameForSession(sessionRef);
+    await this.logNotification(sessionRef, title, body, subtitle);
     if (process.env.PI_APP_TEST_MODE) {
       return;
     }
     const notification = new Notification({
       title,
+      ...(subtitle ? { subtitle } : {}),
       body,
       silent: false,
     });
@@ -342,6 +392,7 @@ export class NotificationManager {
     sessionRef: SessionRef,
     title: string,
     body: string,
+    subtitle: string | undefined,
   ): Promise<void> {
     const logPath = process.env.PI_APP_NOTIFICATION_LOG_PATH?.trim();
     if (!logPath) {
@@ -351,7 +402,7 @@ export class NotificationManager {
     await mkdir(dirname(logPath), { recursive: true });
     await appendFile(
       logPath,
-      `${JSON.stringify({ sessionRef, title, body, timestamp: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ sessionRef, title, subtitle, body, timestamp: new Date().toISOString() })}\n`,
       "utf8",
     );
   }
@@ -419,6 +470,16 @@ export class NotificationManager {
       return true;
     }
     return false;
+  }
+
+  /** The thread's project; a worktree shows its root project's name. */
+  private projectNameForSession(sessionRef: SessionRef): string | undefined {
+    const workspaces = this.latestState?.workspaces ?? [];
+    const workspace = workspaces.find((entry) => entry.id === sessionRef.workspaceId);
+    const root = workspace?.rootWorkspaceId
+      ? workspaces.find((entry) => entry.id === workspace.rootWorkspaceId)
+      : undefined;
+    return (root ?? workspace)?.name || undefined;
   }
 
   private titleForSession(sessionRef: SessionRef): string {

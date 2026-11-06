@@ -1,9 +1,10 @@
-import type {
-  ChildThreadLink,
-  DesktopAppState,
-  SessionRecord,
-  ThreadGrouping,
-  WorkspaceRecord,
+import {
+  NO_THREAD_PARENT,
+  type ChildThreadLink,
+  type DesktopAppState,
+  type SessionRecord,
+  type ThreadGrouping,
+  type WorkspaceRecord,
 } from "../../../contracts/desktop-state";
 import {
   compareByRecency,
@@ -60,6 +61,11 @@ export interface RecencyThreadSection {
 export interface ThreadSidebarModel {
   readonly folders: readonly WorkspaceRecord[];
   readonly workspaceGroups: readonly WorkspaceThreadGroup[];
+  /**
+   * Threads outside any project folder. Folder grouping lists them as loose rows above the
+   * folders; time grouping mixes them into the date sections like any other thread.
+   */
+  readonly topLevelThreads: readonly ThreadListEntry[];
   readonly pinnedThreads: readonly ThreadListEntry[];
   readonly recencySections: readonly RecencyThreadSection[];
   readonly archivedThreads: readonly ThreadListEntry[];
@@ -70,7 +76,11 @@ export function buildThreadSidebarModel(
   state: DesktopAppState,
   nowMs: number = Date.now(),
 ): ThreadSidebarModel {
-  const entries = nestThreads(collectThreadEntries(state), state.childThreadLinks);
+  const entries = nestThreads(
+    collectThreadEntries(state),
+    state.childThreadLinks,
+    state.threadParentOverrides,
+  );
   const pinnedThreads = entries
     .filter((entry) => !entry.session.archivedAt && Boolean(entry.session.pinnedAt))
     .sort((left, right) => comparePinnedThreads(left, right, state.pinnedSessionOrder));
@@ -98,12 +108,14 @@ export function buildThreadSidebarModel(
   }
 
   const folders = listFolders(state);
+  const chats = state.workspaces.find((workspace) => workspace.kind === "chats");
   return {
     folders,
     workspaceGroups: folders.map((workspace) => ({
       workspace,
       threads: historyThreads.filter((entry) => entry.folderId === workspace.id),
     })),
+    topLevelThreads: chats ? historyThreads.filter((entry) => entry.folderId === chats.id) : [],
     pinnedThreads,
     recencySections: RECENCY_BUCKET_ORDER.flatMap((bucket) => {
       const threads = historyByBucket.get(bucket);
@@ -115,19 +127,33 @@ export function buildThreadSidebarModel(
 }
 
 /**
- * Nests each child thread under its parent's row. A child stays a top-level row when
+ * Nests each child thread under its parent's row: the parent the user chose by dragging,
+ * else the agent's link. A child stays a top-level row when
  * it is pinned or archived, its parent is archived or missing, or the saved
  * links form a cycle, so every thread stays reachable. View-only: no transcript reads.
  */
 function nestThreads(
   entries: readonly ThreadListEntry[],
   links: readonly ChildThreadLink[],
+  overrides: Readonly<Record<string, string>> = {},
 ): ThreadListEntry[] {
   const byKey = new Map(entries.map((entry) => [sessionThreadKey(entry), entry]));
   const parentOf = new Map<string, string>();
-  for (const link of links) {
-    const key = `${link.childWorkspaceId}:${link.childSessionId}`;
-    const parentKey = `${link.parentWorkspaceId}:${link.parentSessionId}`;
+  const candidates = [
+    ...Object.entries(overrides),
+    ...links.map(
+      (link) =>
+        [
+          `${link.childWorkspaceId}:${link.childSessionId}`,
+          `${link.parentWorkspaceId}:${link.parentSessionId}`,
+        ] as const,
+    ),
+  ];
+  for (const [key, parentKey] of candidates) {
+    // The user's choice, which may be "no parent", replaces the agent's link.
+    if (parentKey === NO_THREAD_PARENT || (key in overrides && overrides[key] !== parentKey)) {
+      continue;
+    }
     const child = byKey.get(key);
     const parent = byKey.get(parentKey);
     if (!child || !parent || key === parentKey || parentOf.has(key)) continue;
@@ -213,8 +239,19 @@ function collectThreadEntries(state: DesktopAppState): ThreadListEntry[] {
   const workspacesById = new Map(
     state.workspaces.map((workspace) => [workspace.id, workspace] as const),
   );
+  const chats = state.workspaces.find((workspace) => workspace.kind === "chats");
+  const chatEntries: ThreadListEntry[] = chats
+    ? chats.sessions.map((session) => ({
+        folderId: chats.id,
+        workspaceId: chats.id,
+        session,
+        environment: { kind: "local" as const, label: "Local" },
+        // No folder to name: the row shows only its title.
+        contextLabel: "",
+      }))
+    : [];
   const folders = listFolders(state);
-  return folders.flatMap((folder) => {
+  const folderEntries = folders.flatMap((folder): ThreadListEntry[] => {
     if (folder.kind !== "primary") {
       return folder.sessions.map((session) => ({
         folderId: folder.id,
@@ -273,6 +310,7 @@ function collectThreadEntries(state: DesktopAppState): ThreadListEntry[] {
       ),
     ];
   });
+  return [...chatEntries, ...folderEntries];
 }
 
 export function sessionThreadKey(thread: ThreadListEntry): string {
@@ -284,6 +322,8 @@ const EMPTY_EXPANDED_HISTORY: ReadonlySet<string> = new Set();
 export function workspaceHistoryExpansionKey(workspaceId: string): string {
   return `workspace:${workspaceId}`;
 }
+
+export const TOP_LEVEL_HISTORY_EXPANSION_KEY = "top-level";
 
 export function recencyHistoryExpansionKey(bucket: RecencyBucketId): string {
   return `bucket:${bucket}`;
@@ -306,15 +346,21 @@ export function visibleThreadShortcutOrder(
   const collapsedWorkspaceIds = new Set(options.collapsedWorkspaceIds ?? []);
   const unpinned =
     options.grouping === "workspace"
-      ? options.model.workspaceGroups
-          .filter((group) => !collapsedWorkspaceIds.has(group.workspace.id))
-          .flatMap(
-            (group) =>
-              threadHistoryPreview(
-                group.threads,
-                expandedHistory.has(workspaceHistoryExpansionKey(group.workspace.id)),
-              ).visible,
-          )
+      ? [
+          ...threadHistoryPreview(
+            options.model.topLevelThreads,
+            expandedHistory.has(TOP_LEVEL_HISTORY_EXPANSION_KEY),
+          ).visible,
+          ...options.model.workspaceGroups
+            .filter((group) => !collapsedWorkspaceIds.has(group.workspace.id))
+            .flatMap(
+              (group) =>
+                threadHistoryPreview(
+                  group.threads,
+                  expandedHistory.has(workspaceHistoryExpansionKey(group.workspace.id)),
+                ).visible,
+            ),
+        ]
       : options.model.recencySections.flatMap(
           (section) =>
             threadHistoryPreview(

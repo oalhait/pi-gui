@@ -22,6 +22,7 @@ import { SettingsNotificationsSection } from "./settings-notifications-section";
 import { SettingsProvidersSection } from "./settings-providers-section";
 import { type SettingsSection, settingsSectionDefinition } from "./settings-sections";
 import { SettingsShortcutsSection } from "./settings-shortcuts-section";
+import { SettingsRemoteHostsSection } from "./settings-remote-hosts-section";
 
 export type { SettingsSection } from "./settings-sections";
 
@@ -38,6 +39,8 @@ interface SettingsViewProps {
   readonly notificationPermissionPending: boolean;
   readonly modelSettingsScopeMode: ModelSettingsScopeMode;
   readonly integratedTerminalShell: string;
+  readonly modelStallTimeoutSeconds: number;
+  readonly onSetModelStallTimeout: (seconds: number) => void;
   readonly themeMode: "system" | "light" | "dark";
   readonly themePresetId: ThemePresetId;
   readonly enableTransparency: boolean;
@@ -76,6 +79,8 @@ export function SettingsView({
   notificationPermissionPending,
   modelSettingsScopeMode,
   integratedTerminalShell,
+  modelStallTimeoutSeconds,
+  onSetModelStallTimeout,
   themeMode,
   themePresetId,
   enableTransparency,
@@ -157,6 +162,8 @@ export function SettingsView({
               runtime={runtime}
               modelSettingsScopeMode={modelSettingsScopeMode}
               integratedTerminalShell={integratedTerminalShell}
+              modelStallTimeoutSeconds={modelStallTimeoutSeconds}
+              onSetModelStallTimeout={onSetModelStallTimeout}
               onSetModelSettingsScopeMode={onSetModelSettingsScopeMode}
               onSetIntegratedTerminalShell={onSetIntegratedTerminalShell}
               onToggleSkillCommands={onToggleSkillCommands}
@@ -164,6 +171,8 @@ export function SettingsView({
           ) : null}
 
           {section === "shortcuts" ? <SettingsShortcutsSection platform={platform} /> : null}
+
+          {section === "remote-hosts" ? <SettingsRemoteHostsSection /> : null}
 
           {section === "providers" ? (
             <SettingsProvidersSection

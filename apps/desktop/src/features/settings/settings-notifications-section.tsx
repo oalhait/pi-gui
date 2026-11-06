@@ -109,6 +109,16 @@ export function SettingsNotificationsSection({
             onChange={(checked) => onSetNotificationPreferences({ attentionNeeded: checked })}
           />
         </SettingsRow>
+        <SettingsRow
+          title={t("settings.notifications.replyPreview.title")}
+          description={t("settings.notifications.replyPreview.description")}
+        >
+          <SettingsSwitch
+            checked={notificationPreferences.showReplyPreview}
+            label={t("settings.notifications.replyPreview.title")}
+            onChange={(checked) => onSetNotificationPreferences({ showReplyPreview: checked })}
+          />
+        </SettingsRow>
       </SettingsGroup>
     </>
   );

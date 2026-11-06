@@ -78,6 +78,13 @@ async function userTexts(window: Page) {
   return window.locator(".timeline-item--user .timeline-item__bubble").allInnerTexts();
 }
 
+/** The user messages shown faded as the ones a pending edit will replace. */
+async function supersededUserTexts(window: Page) {
+  return window
+    .locator(".timeline__virtual-row--superseded .timeline-item--user .timeline-item__bubble")
+    .allInnerTexts();
+}
+
 test("editing works for messages around a run stopped before its first token", async () => {
   test.setTimeout(240_000);
   const userDataDir = await makeUserDataDir();
@@ -130,50 +137,61 @@ test("editing works for messages around a run stopped before its first token", a
       await editMessage(window, "Please stall here");
       await expect(composer).toHaveValue("Please stall here");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
+      await expect.poll(() => supersededUserTexts(window)).toEqual(["Please stall here"]);
+      // Sending the edit replaces the stopped message with a sibling.
+      await send(window, "Edited after the stop");
+      await expect(errorBanner).toHaveCount(0);
+      expect(await userTexts(window)).toEqual(["First question", "Edited after the stop"]);
     });
 
     await test.step("a message sent right after a stopped run, and the stopped one", async () => {
-      await composer.fill("");
       await sendAndStop(window, "Second stall", { settle: true });
       await send(window, "Answer the question above");
       await editMessage(window, "Answer the question above");
       await expect(composer).toHaveValue("Answer the question above");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question", "Second stall"]);
+      await expect.poll(() => supersededUserTexts(window)).toEqual(["Answer the question above"]);
 
       await editMessage(window, "Second stall");
       await expect(composer).toHaveValue("Second stall");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
+      await expect
+        .poll(() => supersededUserTexts(window))
+        .toEqual(["Second stall", "Answer the question above"]);
+      await composer.press("Escape");
+      await expect(composer).toHaveValue("");
+      await expect.poll(() => supersededUserTexts(window)).toEqual([]);
     });
 
     await test.step("a message edited while the stopped run is still settling", async () => {
-      await composer.fill("");
       await sendAndStop(window, "Third stall", { settle: false });
       await editMessage(window, "Third stall");
       await expect(composer).toHaveValue("Third stall");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
+      await expect.poll(() => supersededUserTexts(window)).toEqual(["Third stall"]);
+      await composer.press("Escape");
+      await expect(composer).toHaveValue("");
     });
 
     await test.step("after switching threads and back", async () => {
-      await composer.fill("");
       await sendAndStop(window, "Fourth stall", { settle: true });
       await send(window, "Another follow-up");
       await selectSession(window, "Other thread");
       await selectSession(window, "Stopped thread");
       await expect
-        .poll(() => userTexts(window))
-        .toEqual(["First question", "Fourth stall", "Another follow-up"]);
+        .poll(async () => (await userTexts(window)).slice(-2))
+        .toEqual(["Fourth stall", "Another follow-up"]);
       await editMessage(window, "Fourth stall");
       await expect(composer).toHaveValue("Fourth stall");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
+      await expect
+        .poll(() => supersededUserTexts(window))
+        .toEqual(["Fourth stall", "Another follow-up"]);
+      await composer.press("Escape");
+      await expect(composer).toHaveValue("");
     });
 
     await test.step("switching threads while the stalled run waits", async () => {
-      await composer.fill("");
       await send(window, "Before the switch");
       await composer.fill("Fifth stall");
       await composer.press("Enter");
@@ -187,7 +205,9 @@ test("editing works for messages around a run stopped before its first token", a
       await editMessage(window, "Fifth stall");
       await expect(composer).toHaveValue("Fifth stall");
       await expect(errorBanner).toHaveCount(0);
-      await expect.poll(() => userTexts(window)).toEqual(["First question", "Before the switch"]);
+      await expect.poll(() => supersededUserTexts(window)).toEqual(["Fifth stall"]);
+      await composer.press("Escape");
+      await expect(composer).toHaveValue("");
     });
 
     await test.step("a failed edit stays visible until dismissed and is logged", async () => {

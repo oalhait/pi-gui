@@ -153,6 +153,7 @@ export function buildSnapshot(source: SnapshotSource): SessionSnapshot {
           modelWait: {
             ...source.modelWait,
             ...(source.modelWait.retry ? { retry: { ...source.modelWait.retry } } : {}),
+            ...(source.modelWait.request ? { request: { ...source.modelWait.request } } : {}),
           },
         }
       : {}),

@@ -118,6 +118,9 @@ importers:
       '@pi-gui/pi-sdk-driver':
         specifier: workspace:*
         version: link:../../packages/pi-sdk-driver
+      '@pi-gui/remote-protocol':
+        specifier: workspace:*
+        version: link:../../packages/remote-protocol
       '@pi-gui/session-driver':
         specifier: workspace:*
         version: link:../../packages/session-driver
@@ -386,6 +389,21 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
+  packages/pi-gui-host:
+    dependencies:
+      '@pi-gui/catalogs':
+        specifier: workspace:*
+        version: link:../catalogs
+      '@pi-gui/pi-sdk-driver':
+        specifier: workspace:*
+        version: link:../pi-sdk-driver
+      '@pi-gui/remote-protocol':
+        specifier: workspace:*
+        version: link:../remote-protocol
+      '@pi-gui/session-driver':
+        specifier: workspace:*
+        version: link:../session-driver
+
   packages/pi-sdk-driver:
     dependencies:
       '@earendil-works/pi-coding-agent':
@@ -404,6 +422,15 @@ importers:
       '@earendil-works/pi-ai':
         specifier: ^1.4.0
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(undici@8.10.2)(ws@8.21.3)(zod@4.3.6)
+
+  packages/remote-protocol:
+    dependencies:
+      '@pi-gui/pi-sdk-driver':
+        specifier: workspace:*
+        version: link:../pi-sdk-driver
+      '@pi-gui/session-driver':
+        specifier: workspace:*
+        version: link:../session-driver
 
   packages/session-driver: {}
 

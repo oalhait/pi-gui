@@ -53,6 +53,13 @@ async function userTexts(window: Page) {
   return window.locator(".timeline-item--user .timeline-item__bubble").allInnerTexts();
 }
 
+/** The user messages shown faded as the ones a pending edit will replace. */
+async function supersededUserTexts(window: Page) {
+  return window
+    .locator(".timeline__virtual-row--superseded .timeline-item--user .timeline-item__bubble")
+    .allInnerTexts();
+}
+
 /** The session file's active branch, read with pi's own SessionManager. */
 async function persistedBranch(sessionFile: string) {
   const { SessionManager } = (await import("@earendil-works/pi-coding-agent")) as {
@@ -80,7 +87,7 @@ async function persistedBranch(sessionFile: string) {
     );
 }
 
-test("editing an earlier user message rewinds the thread in place and reruns from there", async () => {
+test("sending an edited user message rewinds the thread in place and reruns from there", async () => {
   test.setTimeout(180_000);
   const userDataDir = await makeUserDataDir();
   const agentDir = join(userDataDir, "agent");
@@ -142,14 +149,23 @@ test("editing an earlier user message rewinds the thread in place and reruns fro
       await expect(composer).toBeFocused();
       await expect(errorBanner).toHaveCount(0);
       expect((await getDesktopState(window)).selectedSessionId).toBe(sessionId);
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
-      await expect(transcript).toContainText("Answer to First question");
-      await expect(transcript).not.toContainText("Third question");
+      // The thread is unchanged until the edit is sent.
+      await expect(window.getByTestId("composer-message-edit")).toBeVisible();
+      expect(await userTexts(window)).toEqual([
+        "First question",
+        "Second question",
+        "Third question",
+      ]);
+      await expect
+        .poll(() => supersededUserTexts(window))
+        .toEqual(["Second question", "Third question"]);
 
       const requestsBefore = server.requests.length;
       await send(window, "Second question, edited");
       await expect(errorBanner).toHaveCount(0);
       expect(await userTexts(window)).toEqual(["First question", "Second question, edited"]);
+      await expect(window.getByTestId("composer-message-edit")).toHaveCount(0);
+      await expect(transcript).not.toContainText("Third question");
       const sent = server.requests.slice(requestsBefore).find((r) => r.toolNames.length > 0);
       expect(sent?.messages.filter((m) => m.role !== "system").map((m) => m.content)).toEqual([
         "First question",
@@ -161,7 +177,7 @@ test("editing an earlier user message rewinds the thread in place and reruns fro
     await test.step("the latest message", async () => {
       await editMessage(window, "Second question, edited");
       await expect(composer).toHaveValue("Second question, edited");
-      await expect.poll(() => userTexts(window)).toEqual(["First question"]);
+      await expect.poll(() => supersededUserTexts(window)).toEqual(["Second question, edited"]);
       await send(window, "Second question, again");
       await expect(errorBanner).toHaveCount(0);
     });
@@ -169,7 +185,9 @@ test("editing an earlier user message rewinds the thread in place and reruns fro
     await test.step("the first message", async () => {
       await editMessage(window, "First question");
       await expect(composer).toHaveValue("First question");
-      await expect.poll(() => userTexts(window)).toEqual([]);
+      await expect
+        .poll(() => supersededUserTexts(window))
+        .toEqual(["First question", "Second question, again"]);
       await expect(errorBanner).toHaveCount(0);
       await send(window, "First question, edited");
       await send(window, "Follow-up");

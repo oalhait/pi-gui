@@ -52,8 +52,15 @@
 }
 
 .new-thread__workspace-picker {
-  display: grid;
-  justify-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.new-thread__workspace:disabled {
+  opacity: 1;
+  color: var(--muted);
 }
 
 .new-thread__workspace {

@@ -32,6 +32,8 @@ function handlers(
     startRename: record("rename"),
     setPinned: (_subject, pinned) => calls.push(`pin:${pinned}`),
     archive: record("archive"),
+    startMove: record("move"),
+    unnest: record("unnest"),
     restore: record("restore"),
     markRead: record("mark-read"),
     markUnread: record("mark-unread"),
@@ -50,6 +52,7 @@ test("an open thread lists rename, pin, archive, scheduled task and copy with sh
     "Rename thread",
     "Pin thread",
     "Archive thread",
+    "Move to…",
     "Mark as unread",
     "Add scheduled task…",
     "Copy session ID",
@@ -70,6 +73,7 @@ test("state changes the list: pinned, unseen, scheduled and archived threads", (
     "Rename thread",
     "Unpin thread",
     "Archive thread",
+    "Move to…",
     "Mark as read",
     "Edit scheduled task…",
     "Copy session ID",
@@ -101,4 +105,28 @@ test("read actions toggle between marking unread and marking read", () => {
     .find((action) => action.id === "mark-read")
     ?.run();
   expect(recorder.calls).toEqual(["mark-unread", "mark-read"]);
+});
+
+test("only a thread with no run going offers Move to…", () => {
+  const recorder = handlers("darwin");
+  const idle = buildThreadActions({ workspaceId: "ws", session: session() }, recorder);
+  idle.find((action) => action.id === "move-thread")?.run();
+  expect(recorder.calls).toEqual(["move"]);
+  const running = buildThreadActions(
+    { workspaceId: "ws", session: session({ status: "running" }) },
+    recorder,
+  );
+  expect(running.some((action) => action.id === "move-thread")).toBe(false);
+});
+
+test("a nested thread offers Move out of parent", () => {
+  const recorder = handlers("darwin");
+  const top = buildThreadActions({ workspaceId: "ws", session: session() }, recorder);
+  expect(top.some((action) => action.id === "unnest-thread")).toBe(false);
+  const nested = buildThreadActions(
+    { workspaceId: "ws", session: session(), parentKey: "ws:parent" },
+    recorder,
+  );
+  nested.find((action) => action.id === "unnest-thread")?.run();
+  expect(recorder.calls).toEqual(["unnest"]);
 });

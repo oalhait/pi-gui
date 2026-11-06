@@ -13,6 +13,7 @@ import {
   recencyHistoryExpansionKey,
   sessionThreadKey,
   threadHistoryPreview,
+  TOP_LEVEL_HISTORY_EXPANSION_KEY,
   visibleThreadShortcutOrder,
   workspaceHistoryExpansionKey,
 } from "../../src/features/threads/thread-groups";
@@ -537,4 +538,120 @@ test("malformed cycles cannot hide sessions or loop during hierarchy traversal",
   const visible = flattenThreadTrees(model.recencySections.flatMap((section) => section.threads));
   expect(new Set(visible.map(sessionThreadKey)).size).toBe(3);
   expect(visible).toHaveLength(3);
+});
+
+test("threads without a folder join the recency list and stay loose, never a folder", () => {
+  const chats = workspace(
+    "chats",
+    "Chats",
+    [
+      session("chat-new", "Research question", { updatedAt: isoDaysAgo(0, 14) }),
+      session("chat-old", "Old question", { updatedAt: isoDaysAgo(3) }),
+    ],
+    { kind: "chats" },
+  );
+  const alpha = workspace("alpha", "Alpha", [
+    session("alpha-today", "Alpha thread", { updatedAt: isoDaysAgo(0, 10) }),
+  ]);
+  const model = buildThreadSidebarModel(state([alpha, chats]), nowMs);
+
+  expect(model.folders.map((folder) => folder.id)).toEqual(["alpha"]);
+  expect(model.workspaceGroups.map((group) => group.workspace.id)).toEqual(["alpha"]);
+  expect(model.topLevelThreads.map((thread) => thread.session.id)).toEqual([
+    "chat-new",
+    "chat-old",
+  ]);
+  expect(model.recencyOrder.map((thread) => thread.session.id)).toEqual([
+    "chat-new",
+    "alpha-today",
+    "chat-old",
+  ]);
+  // No folder label: the row shows only its title.
+  expect(model.recencyOrder[0]?.contextLabel).toBe("");
+  expect(model.recencyOrder[0]?.environment.kind).toBe("local");
+
+  // Folder grouping numbers the loose rows before the folders' rows.
+  const order = visibleThreadShortcutOrder({ grouping: "workspace", model });
+  expect(order.map((thread) => thread.session.id)).toEqual(["chat-new", "chat-old", "alpha-today"]);
+});
+
+test("loose threads show five rows until expanded", () => {
+  const chats = workspace(
+    "chats",
+    "Chats",
+    Array.from({ length: 7 }, (_, index) =>
+      session(`chat-${index}`, `Chat ${index}`, { updatedAt: isoDaysAgo(index) }),
+    ),
+    { kind: "chats" },
+  );
+  const model = buildThreadSidebarModel(state([chats]), nowMs);
+  expect(visibleThreadShortcutOrder({ grouping: "workspace", model })).toHaveLength(5);
+  expect(
+    visibleThreadShortcutOrder({
+      grouping: "workspace",
+      model,
+      expandedHistory: new Set([TOP_LEVEL_HISTORY_EXPANSION_KEY]),
+    }),
+  ).toHaveLength(7);
+});
+
+test("an empty Chats workspace adds no rows", () => {
+  const model = buildThreadSidebarModel(
+    state([workspace("chats", "Chats", [], { kind: "chats" })]),
+    nowMs,
+  );
+  expect(model.topLevelThreads).toEqual([]);
+  expect(model.folders).toEqual([]);
+  expect(model.recencyOrder).toEqual([]);
+});
+
+test("a parent chosen by dragging nests a thread, even across folders, and wins over an agent link", () => {
+  const alpha = workspace("alpha", "Alpha", [
+    session("parent", "Parent", { updatedAt: isoDaysAgo(0, 9) }),
+    session("agent-child", "Agent child", { updatedAt: isoDaysAgo(0, 8) }),
+  ]);
+  const chats = workspace(
+    "chats",
+    "Chats",
+    [session("loose", "Loose chat", { updatedAt: isoDaysAgo(0, 7) })],
+    { kind: "chats" },
+  );
+  const agentLink: ChildThreadLink = {
+    id: "link",
+    parentWorkspaceId: "alpha",
+    parentSessionId: "parent",
+    childWorkspaceId: "alpha",
+    childSessionId: "agent-child",
+    title: "Agent child",
+    status: "complete",
+  };
+  const model = buildThreadSidebarModel(
+    state([alpha, chats], {
+      childThreadLinks: [agentLink],
+      threadParentOverrides: { "chats:loose": "alpha:parent", "alpha:agent-child": "none" },
+    }),
+    nowMs,
+  );
+  const parent = model.recencyOrder.find((thread) => thread.session.id === "parent");
+  expect(parent?.children?.map((child) => child.session.id)).toEqual(["loose"]);
+  expect(model.topLevelThreads).toEqual([]);
+  const agentChild = model.recencyOrder.find((thread) => thread.session.id === "agent-child");
+  expect(agentChild?.parentKey).toBeUndefined();
+});
+
+test("a pinned thread stays a top-level row whatever parent it was given", () => {
+  const model = buildThreadSidebarModel(
+    state(
+      [
+        workspace("alpha", "Alpha", [
+          session("parent", "Parent", { updatedAt: isoDaysAgo(0) }),
+          session("pinned", "Pinned", { updatedAt: isoDaysAgo(0), pinnedAt: isoDaysAgo(0) }),
+        ]),
+      ],
+      { threadParentOverrides: { "alpha:pinned": "alpha:parent" } },
+    ),
+    nowMs,
+  );
+  expect(model.pinnedThreads.map((thread) => thread.session.id)).toEqual(["pinned"]);
+  expect(model.recencyOrder.find((t) => t.session.id === "pinned")?.parentKey).toBeUndefined();
 });

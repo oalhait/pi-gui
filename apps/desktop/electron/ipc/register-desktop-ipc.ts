@@ -29,6 +29,7 @@ import { WorkbenchRequests, type WorkbenchOwner } from "./workbench-requests";
 import type { DesktopExtensionViewOwner } from "../extensions/extension-view-owner";
 import { registerExtensionViewRequests } from "./extension-view-requests";
 import { registerReviewRequests, type ReviewRequestsOwner } from "./review-requests";
+import { registerRemoteHostRequests, type RemoteHostRequestsOwner } from "./remote-host-requests";
 import { mainFrameHandler } from "./main-frame-ipc";
 import { assertComposerAttachmentPixels } from "./composer-attachment-pixels";
 import {
@@ -40,6 +41,8 @@ import {
   expectCustomProviderConfig,
   expectCustomProviderProbeInput,
   expectForkThreadInput,
+  expectMoveThreadInput,
+  expectSetThreadParentInput,
   expectHostUiResponse,
   expectMcpServerScope,
   expectModelSettingsScopeMode,
@@ -56,6 +59,7 @@ import {
   expectSessionTarget,
   expectRecord,
   expectSetChildSupervisionLoopInput,
+  expectStallSeconds,
   expectStartThreadInput,
   expectCreateScheduledTaskInput,
   expectUpdateScheduledTaskInput,
@@ -110,6 +114,8 @@ type ConversationOwner = Pick<
   | "createSession"
   | "startThread"
   | "forkThread"
+  | "moveThread"
+  | "setThreadParent"
   | "cancelCurrentRun"
   | "addComposerAttachments"
   | "removeComposerAttachment"
@@ -124,7 +130,8 @@ type ConversationOwner = Pick<
   | "reportExtensionActionFailure"
   | "getSessionTree"
   | "navigateSessionTree"
-  | "rewindToMessage"
+  | "startMessageEdit"
+  | "cancelMessageEdit"
   | "respondToHostUiRequest"
   | "setSessionModel"
   | "setSessionThinkingLevel"
@@ -168,6 +175,7 @@ type SettingsOwner = Pick<
   | "setCodemodeAlwaysOn"
   | "setNotificationPreferences"
   | "setIntegratedTerminalShell"
+  | "setModelStallTimeout"
   | "setEnableTransparency"
   | "getSkillFilePath"
   | "getExtensionFilePath"
@@ -237,6 +245,7 @@ export interface DesktopIpcCapabilities {
     options: { readonly sourcePath?: string },
   ) => Promise<void>;
   readonly relaunchApplication: () => void;
+  readonly remoteHosts: () => RemoteHostRequestsOwner;
 }
 
 export interface RegisterDesktopIpcOptions {
@@ -257,6 +266,7 @@ export function registerDesktopIpc({
   const handleMainFrame = mainFrameHandler(windows);
   registerBrowserRequests(handleMainFrame, windows);
   registerReviewRequests(handleMainFrame, owners.review);
+  registerRemoteHostRequests(handleMainFrame, capabilities.remoteHosts);
   registerExtensionViewRequests(handleMainFrame, windows, owners.extensionViews);
   const workbench = new WorkbenchRequests(owners.workbench);
   const workbenchSenders = new WeakSet<Electron.WebContents>();
@@ -699,6 +709,9 @@ export function registerDesktopIpc({
       owners.settings.setIntegratedTerminalShell(expectString(rawShellPath, "shellPath")),
     ),
   );
+  ipcMain.handle(desktopIpc.setModelStallTimeout, (event, rawSeconds: unknown) =>
+    run(event, () => owners.settings.setModelStallTimeout(expectStallSeconds(rawSeconds))),
+  );
   ipcMain.handle(desktopIpc.setEnableTransparency, async (event, rawEnabled: unknown) => {
     const window = senderWindow(windows, event);
     const enabled = expectBoolean(rawEnabled, "enabled");
@@ -736,6 +749,12 @@ export function registerDesktopIpc({
   });
   ipcMain.handle(desktopIpc.forkThread, (event, rawInput: unknown) =>
     run(event, () => owners.conversation.forkThread(expectForkThreadInput(rawInput))),
+  );
+  ipcMain.handle(desktopIpc.moveThread, (event, rawInput: unknown) =>
+    run(event, () => owners.conversation.moveThread(expectMoveThreadInput(rawInput))),
+  );
+  ipcMain.handle(desktopIpc.setThreadParent, (event, rawInput: unknown) =>
+    run(event, () => owners.conversation.setThreadParent(expectSetThreadParentInput(rawInput))),
   );
   ipcMain.handle(desktopIpc.sendChildThreadFollowUp, (event, rawInput: unknown) =>
     run(event, () =>
@@ -999,13 +1018,15 @@ export function registerDesktopIpc({
       );
     },
   );
-  ipcMain.handle(desktopIpc.rewindToMessage, (event, rawTarget: unknown, rawId: unknown) => {
-    const window = senderWindow(windows, event);
-    const target = expectSessionTarget(rawTarget);
-    const sourceMessageId = expectNonEmptyString(rawId, "sourceMessageId");
-    return windows.runStateResultAction(window, () =>
-      owners.conversation.rewindToMessage(target, sourceMessageId),
+  ipcMain.handle(desktopIpc.startMessageEdit, (event, rawMessageId: unknown) => {
+    const target = windows.targetForSender(event.sender);
+    return run(event, () =>
+      owners.conversation.startMessageEdit(target, expectNonEmptyString(rawMessageId, "messageId")),
     );
+  });
+  ipcMain.handle(desktopIpc.cancelMessageEdit, (event) => {
+    const target = windows.targetForSender(event.sender);
+    return run(event, () => owners.conversation.cancelMessageEdit(target));
   });
 
   registerWorkspaceFileIpc(windows, owners.workspace, capabilities);
