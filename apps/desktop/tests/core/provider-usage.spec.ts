@@ -70,3 +70,69 @@ test("distinguishes unavailable account limits from zero usage", async () => {
     await app.close();
   }
 });
+
+test("shows Claude plan limits, usage credits and credit billing", async ({}, testInfo) => {
+  const app = await launchDesktop(await makeUserDataDir(), {
+    initialWorkspaces: [await makeWorkspace("provider-usage-credits")],
+    testMode: "background",
+  });
+  try {
+    const page = await app.firstWindow();
+    await createNamedThread(page, "Usage credits");
+    await app.electronApp.evaluate(({ ipcMain }, channel) => {
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, () => [
+        {
+          providerId: "openai",
+          status: "available",
+          checkedAt: "2026-11-06T22:00:00Z",
+          billedToCredits: true,
+          windows: [
+            { label: "Session", usedPercent: 0, severity: "normal", active: true },
+            {
+              label: "Weekly · Opus",
+              usedPercent: 0,
+              severity: "normal",
+              active: false,
+              resetsAt: "2026-11-12T23:00:00Z",
+            },
+          ],
+          credits: {
+            used: 550.22,
+            limit: 5000,
+            currency: "USD",
+            fractionDigits: 2,
+            usedPercent: 11.0044,
+            severity: "warning",
+            limitReached: false,
+            disclaimer:
+              "Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)",
+          },
+        },
+      ]);
+    }, desktopIpc.providerUsage);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+," : "Control+,");
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    const usage = page.getByTestId("provider-usage");
+    await expect(usage).toContainText("Weekly · Opus");
+    await expect(usage).toContainText("Active · Severity: normal");
+    await expect(usage).toContainText("Not active · Severity: normal · Resets");
+    const credits = usage.getByTestId("provider-usage-credits");
+    await expect(credits).toContainText("Usage credits");
+    await expect(credits).toContainText("$550.22 of $5,000.00 this month (11%)");
+    await expect(credits).toContainText("Severity: warning");
+    await expect(credits).toContainText(
+      "Requests from this app are being billed to usage credits rather than your plan's included usage.",
+    );
+    await expect(credits).toHaveClass(/provider-usage__window--warning/);
+    await expect(credits.getByRole("link", { name: "Learn more" })).toHaveAttribute(
+      "href",
+      "https://support.claude.com/articles/12429409",
+    );
+    await expect(credits.getByRole("progressbar")).toHaveAttribute("value", "11.0044");
+    await credits.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("provider-usage-credits.png") });
+  } finally {
+    await app.close();
+  }
+});

@@ -117,4 +117,4 @@ export type {
   SessionTokenCounts,
   SessionUsageSnapshot,
 } from "./usage.js";
-export type { ProviderUsage, ProviderUsageWindow } from "./provider-usage.js";
+export type { ProviderUsage, ProviderUsageCredits, ProviderUsageWindow } from "./provider-usage.js";

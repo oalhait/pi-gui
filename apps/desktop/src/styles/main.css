@@ -3413,3 +3413,13 @@ mark.thread-find-active {
   font-size: 12px;
   margin: 6px 0 0;
 }
+.provider-usage__note a {
+  color: inherit;
+  text-decoration: underline;
+}
+.provider-usage__window--warning progress {
+  accent-color: var(--status-warning);
+}
+.provider-usage__note--warning {
+  color: var(--status-warning);
+}
