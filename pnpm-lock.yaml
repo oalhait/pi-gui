@@ -118,6 +118,9 @@ importers:
       '@pi-gui/pi-sdk-driver':
         specifier: workspace:*
         version: link:../../packages/pi-sdk-driver
+      '@pi-gui/remote-protocol':
+        specifier: workspace:*
+        version: link:../../packages/remote-protocol
       '@pi-gui/session-driver':
         specifier: workspace:*
         version: link:../../packages/session-driver
