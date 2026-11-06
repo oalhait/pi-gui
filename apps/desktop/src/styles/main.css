@@ -1033,6 +1033,31 @@
   cursor: pointer;
 }
 
+.composer__message-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted-strong);
+  font-size: 0.86rem;
+}
+
+.composer__message-edit button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--muted-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer__message-edit button:hover,
+.composer__message-edit button:focus-visible {
+  color: var(--text-strong);
+}
+
 .queued-composer-messages__editing button:hover,
 .queued-composer-message__actions button:hover {
   color: var(--text-strong);

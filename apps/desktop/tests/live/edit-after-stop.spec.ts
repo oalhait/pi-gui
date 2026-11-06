@@ -62,6 +62,10 @@ test("a question stopped while waiting for a real model can be edited straight a
     page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
   const userTexts = (page: Page) =>
     page.locator(".timeline-item--user .timeline-item__bubble").allInnerTexts();
+  const supersededTexts = (page: Page) =>
+    page
+      .locator(".timeline__virtual-row--superseded .timeline-item--user .timeline-item__bubble")
+      .allInnerTexts();
 
   const harness = await launchDesktop(profile, {
     agentDir,
@@ -97,7 +101,9 @@ test("a question stopped while waiting for a real model can be edited straight a
       "Write a 600-word essay about lighthouses, then say BRAVO-TWO.",
     );
     await expect(errorBanner).toHaveCount(0);
-    await expect.poll(() => userTexts(page)).toEqual(["Reply with exactly ALPHA-ONE."]);
+    await expect
+      .poll(() => supersededTexts(page))
+      .toEqual(["Write a 600-word essay about lighthouses, then say BRAVO-TWO."]);
     await shot(page, "2-edited-stopped-question");
 
     await composer.fill("Reply with exactly BRAVO-EDITED.");

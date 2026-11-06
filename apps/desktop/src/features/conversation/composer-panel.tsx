@@ -54,6 +54,8 @@ interface ComposerPanelProps {
   readonly attachments: readonly ComposerAttachment[];
   readonly queuedMessages: readonly QueuedComposerMessage[];
   readonly editingQueuedMessageId?: string;
+  /** Set while the composer edits a sent message. */
+  readonly onCancelMessageEdit?: (() => void) | undefined;
   readonly provider: string | undefined;
   readonly modelId: string | undefined;
   readonly thinkingLevel: string | undefined;
@@ -114,6 +116,7 @@ export function ComposerPanel({
   attachments,
   queuedMessages,
   editingQueuedMessageId,
+  onCancelMessageEdit,
   provider,
   modelId,
   thinkingLevel,
@@ -180,6 +183,7 @@ export function ComposerPanel({
           attachments={attachments}
           queuedMessages={queuedMessages}
           editingQueuedMessageId={editingQueuedMessageId}
+          onCancelMessageEdit={onCancelMessageEdit}
           slashSections={slashSections}
           slashOptions={slashOptions}
           selectedSlashCommand={selectedSlashCommand}

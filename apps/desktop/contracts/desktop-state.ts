@@ -64,7 +64,8 @@ export type ComposerDraftSyncSource =
   | "remote-persist"
   | "command"
   | "extension-editor-text"
-  | "queued-message-edit";
+  | "queued-message-edit"
+  | "message-edit";
 
 export interface NotificationPreferences {
   readonly backgroundCompletion: boolean;
@@ -485,6 +486,11 @@ export interface DesktopAppState {
   readonly composerAttachments: readonly ComposerAttachment[];
   readonly queuedComposerMessages: readonly QueuedComposerMessage[];
   readonly editingQueuedMessageId?: string;
+  /**
+   * The sent user message the selected thread's composer is editing (its transcript row id).
+   * The thread is unchanged until the edit is sent; rows from this one down will be replaced.
+   */
+  readonly editingMessageId?: string;
   readonly runtimeByWorkspace: Readonly<Record<string, RuntimeSnapshot>>;
   readonly sessionCommandsBySession: Readonly<Record<string, readonly RuntimeCommandRecord[]>>;
   /** Context, cache and usage for open sessions; absent until pi reports it. */

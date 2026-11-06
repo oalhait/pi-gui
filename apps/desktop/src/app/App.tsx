@@ -485,6 +485,7 @@ export default function App() {
     editFromMessage,
     editError,
     dismissEditError,
+    cancelMessageEdit,
     handleForkSubmit,
     canUseWorktree,
   } = useTreeForkModals({
@@ -495,8 +496,8 @@ export default function App() {
     selectedSession,
     selectedSessionKey,
     rootWorkspace,
-    activeView: snapshot?.activeView,
     setComposerDraft,
+    flushComposerDraft,
     focusComposer,
   });
 
@@ -1177,6 +1178,7 @@ export default function App() {
                     extensionToolLabels={extensionToolLabels}
                     workspacePath={selectedWorkspace.path}
                     onEditFromMessage={editFromMessage}
+                    editingMessageId={snapshot.editingMessageId}
                     onForkFromMessage={
                       selectedSession.status === "running" ? undefined : openForkModal
                     }
@@ -1201,6 +1203,7 @@ export default function App() {
                 attachments={composerAttachments}
                 queuedMessages={queuedComposerMessages}
                 editingQueuedMessageId={editingQueuedMessageId}
+                onCancelMessageEdit={cancelMessageEdit}
                 composerDraft={composerDraft}
                 composerRef={composerRef}
                 runtime={selectedModelRuntime}

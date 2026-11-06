@@ -124,7 +124,8 @@ type ConversationOwner = Pick<
   | "reportExtensionActionFailure"
   | "getSessionTree"
   | "navigateSessionTree"
-  | "rewindToMessage"
+  | "startMessageEdit"
+  | "cancelMessageEdit"
   | "respondToHostUiRequest"
   | "setSessionModel"
   | "setSessionThinkingLevel"
@@ -999,13 +1000,15 @@ export function registerDesktopIpc({
       );
     },
   );
-  ipcMain.handle(desktopIpc.rewindToMessage, (event, rawTarget: unknown, rawId: unknown) => {
-    const window = senderWindow(windows, event);
-    const target = expectSessionTarget(rawTarget);
-    const sourceMessageId = expectNonEmptyString(rawId, "sourceMessageId");
-    return windows.runStateResultAction(window, () =>
-      owners.conversation.rewindToMessage(target, sourceMessageId),
+  ipcMain.handle(desktopIpc.startMessageEdit, (event, rawMessageId: unknown) => {
+    const target = windows.targetForSender(event.sender);
+    return run(event, () =>
+      owners.conversation.startMessageEdit(target, expectNonEmptyString(rawMessageId, "messageId")),
     );
+  });
+  ipcMain.handle(desktopIpc.cancelMessageEdit, (event) => {
+    const target = windows.targetForSender(event.sender);
+    return run(event, () => owners.conversation.cancelMessageEdit(target));
   });
 
   registerWorkspaceFileIpc(windows, owners.workspace, capabilities);

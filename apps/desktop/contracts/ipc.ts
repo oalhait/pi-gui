@@ -243,7 +243,8 @@ export const desktopIpc = {
   submitComposer: "pi-gui:submit-composer",
   getSessionTree: "pi-gui:get-session-tree",
   navigateSessionTree: "pi-gui:navigate-session-tree",
-  rewindToMessage: "pi-gui:rewind-to-message",
+  startMessageEdit: "pi-gui:start-message-edit",
+  cancelMessageEdit: "pi-gui:cancel-message-edit",
   toggleWindowMaximize: "pi-gui:toggle-window-maximize",
   minimizeWindow: "pi-gui:minimize-window",
   closeWindow: "pi-gui:close-window",
@@ -969,11 +970,13 @@ export interface PiDesktopApi {
     targetId: string,
     options?: NavigateSessionTreeOptions,
   ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
-  /** Rewinds the thread to just before a sent user message so it can be edited and rerun. */
-  rewindToMessage(
-    target: WorkspaceSessionTarget,
-    sourceMessageId: string,
-  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }>;
+  /**
+   * Puts a sent user message (by row or session entry id) in the selected thread's composer for
+   * editing. The thread is not rewound until the edit is sent; Cancel gives back the saved draft.
+   */
+  startMessageEdit(messageId: string): Promise<DesktopAppState>;
+  /** Leaves message editing with the thread untouched and the earlier draft back. */
+  cancelMessageEdit(): Promise<DesktopAppState>;
   listWorkspaceFiles(
     workspaceId: string,
     options?: { readonly force?: boolean },

@@ -80,6 +80,10 @@ test("edits an earlier message against a real provider and keeps the branch acro
     page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
   const userTexts = (page: Page) =>
     page.locator(".timeline-item--user .timeline-item__bubble").allInnerTexts();
+  const supersededTexts = (page: Page) =>
+    page
+      .locator(".timeline__virtual-row--superseded .timeline-item--user .timeline-item__bubble")
+      .allInnerTexts();
 
   let harness = await launch();
   let title = "";
@@ -99,11 +103,32 @@ test("edits an earlier message against a real provider and keeps the branch acro
     await sendAndWait(page, "Reply with exactly CHARLIE-THREE.", "CHARLIE-THREE");
     await shot(page, "1-before-edit");
 
+    const composer = page.getByTestId("composer");
+    const editBar = page.getByTestId("composer-message-edit");
+    const allThree = [
+      "Reply with exactly ALPHA-ONE.",
+      "Reply with exactly BRAVO-TWO.",
+      "Reply with exactly CHARLIE-THREE.",
+    ];
+    await composer.fill("An unsent draft");
     await editMessage(page, "BRAVO-TWO");
-    await expect(page.getByTestId("composer")).toHaveValue("Reply with exactly BRAVO-TWO.");
+    await expect(composer).toHaveValue("Reply with exactly BRAVO-TWO.");
     await expect(page.getByTestId("composer-error-banner")).toHaveCount(0);
-    await expect.poll(() => userTexts(page)).toEqual(["Reply with exactly ALPHA-ONE."]);
+    await expect(editBar).toContainText("Editing an earlier message");
+    await expect.poll(() => supersededTexts(page)).toEqual(allThree.slice(1));
+    expect(await userTexts(page)).toEqual(allThree);
     await shot(page, "2-after-edit-click");
+
+    // Cancel leaves the thread as it was and gives the draft back.
+    await editBar.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(editBar).toHaveCount(0);
+    await expect(composer).toHaveValue("An unsent draft");
+    await expect.poll(() => supersededTexts(page)).toEqual([]);
+    expect(await userTexts(page)).toEqual(allThree);
+    await shot(page, "2b-after-cancel");
+
+    await editMessage(page, "BRAVO-TWO");
+    await expect(composer).toHaveValue("Reply with exactly BRAVO-TWO.");
 
     await sendAndWait(page, "Reply with exactly BRAVO-EDITED.", "BRAVO-EDITED");
     await expect(page.getByTestId("composer-error-banner")).toHaveCount(0);

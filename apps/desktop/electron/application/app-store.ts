@@ -128,7 +128,12 @@ import { decodeTaskWorkbenchTemplate, type TaskWorkbenchTemplate } from "../../c
 import { composerImageSavedSkipMessage } from "../../contracts/composer-attachments";
 import { extensionToolLabels } from "../../contracts/tool-labels";
 import { quarantinePersistedComposerAttachments } from "../ipc/composer-attachment-pixels";
-import { SessionStateMap, type QueuedComposerEditState } from "../conversation/session-state-map";
+import {
+  SessionStateMap,
+  type MessageEditState,
+  type QueuedComposerEditState,
+} from "../conversation/session-state-map";
+import { attachmentsToPersist, draftsToPersist } from "../conversation/message-edit";
 import {
   createEmptyExtensionUiState,
   serializeExtensionUiState,
@@ -423,6 +428,13 @@ export class DesktopAppStore {
       setQueuedComposerEditState: (sessionRef, editState) =>
         this.setQueuedComposerEditState(sessionRef, editState),
       getQueuedComposerEditState: (sessionRef) => this.getQueuedComposerEditState(sessionRef),
+      setMessageEditState: (sessionRef, editState) =>
+        this.setMessageEditState(sessionRef, editState),
+      getMessageEditState: (sessionRef) =>
+        this.sessionState.messageEditsBySession.get(sessionKey(sessionRef)),
+      resolveEditableEntryId: (sessionRef, messageId) =>
+        this.resolveEditableEntryId(sessionRef, messageId),
+      rewindToUserEntry: (sessionRef, entryId) => this.rewindToUserEntry(sessionRef, entryId),
       reloadTranscriptFromDriver: (sessionRef) => this.reloadTranscriptFromDriver(sessionRef),
       publishSelectedTranscriptFor: (sessionRef) => this.publishSelectedTranscriptFor(sessionRef),
       clearPendingAutoTitle: (sessionRef) => this.clearPendingAutoTitle(sessionRef),
@@ -799,6 +811,7 @@ export class DesktopAppStore {
         selectedWorkspaceId,
         selectedSessionId,
       ),
+      editingMessageId: this.resolveEditingMessageId(selectedWorkspaceId, selectedSessionId),
       lastError:
         this.resolveSelectedSessionError(selectedWorkspaceId, selectedSessionId, false) ??
         (selectedSessionId ? undefined : state.lastError),
@@ -1294,6 +1307,8 @@ export class DesktopAppStore {
     await this.initialize();
     const sessionRef = toSessionRef(target);
     await this.ensureSessionReady(sessionRef);
+    // Moving through /tree ends a message edit: the edit's later turns may no longer be shown.
+    this.conversationOwner.abandonMessageEdit(sessionRef);
 
     return this.publishTreeNavigation(
       target,
@@ -1301,38 +1316,57 @@ export class DesktopAppStore {
     );
   }
 
-  /** Edit a sent user message: rewind the thread to just before it, keeping later turns in /tree. */
-  async rewindToMessage(
-    target: WorkspaceSessionTarget,
-    sourceMessageId: string,
-  ): Promise<{ readonly state: DesktopAppState; readonly result: NavigateSessionTreeResult }> {
-    await this.initialize();
-    const sessionRef = toSessionRef(target);
+  /** Puts a sent user message in the composer for editing; the thread changes only on send. */
+  async startMessageEdit(
+    sessionRef: SessionRef | undefined,
+    messageId: string,
+  ): Promise<DesktopAppState> {
+    return this.conversationOwner.startMessageEdit(sessionRef, messageId);
+  }
+
+  async cancelMessageEdit(sessionRef: SessionRef | undefined): Promise<DesktopAppState> {
+    return this.conversationOwner.cancelMessageEdit(sessionRef);
+  }
+
+  private async resolveEditableEntryId(sessionRef: SessionRef, messageId: string): Promise<string> {
     await this.ensureSessionReady(sessionRef);
     const key = sessionKey(sessionRef);
-    let entryId = sourceMessageId;
+    let entryId = messageId;
     try {
       const transcript = this.sessionState.transcriptCache.get(key) ?? [];
-      // A row Pi has identified needs no branch read; only an unidentified one is matched.
-      entryId =
-        resolveUserEntryId(transcript, [], sourceMessageId) ??
-        resolveUserEntryId(
-          transcript,
-          await this.driver.getTranscript(sessionRef),
-          sourceMessageId,
-        ) ??
-        sourceMessageId;
-      return this.publishTreeNavigation(
-        target,
-        await this.driver.rewindToUserMessage(sessionRef, entryId),
+      const branch = await this.driver.getTranscript(sessionRef);
+      // A row sent this app run may not know its entry yet; it is matched against the branch.
+      entryId = resolveUserEntryId(transcript, branch, messageId) ?? messageId;
+      const onBranch = branch.some(
+        (item) =>
+          item.kind === "message" &&
+          item.role === "user" &&
+          (item.sourceMessageId ?? item.id) === entryId,
       );
+      if (!onBranch) {
+        throw new Error(
+          `This message is not on the thread's current branch, so it can't be edited (no user message ${entryId} in session ${key}).`,
+        );
+      }
+      return entryId;
     } catch (error) {
       console.error(
-        `[app-store] editing message ${sourceMessageId} (entry ${entryId}) in ${key} failed:`,
+        `[app-store] editing message ${messageId} (entry ${entryId}) in ${key} failed:`,
         error,
       );
       throw error;
     }
+  }
+
+  /** pi's /tree on a user entry: the leaf moves to its parent, later turns stay in /tree. */
+  private async rewindToUserEntry(sessionRef: SessionRef, entryId: string): Promise<void> {
+    await this.ensureSessionReady(sessionRef);
+    const result = await this.driver.rewindToUserMessage(sessionRef, entryId);
+    if (result.cancelled || result.aborted) {
+      throw new Error("The edit was cancelled before the thread changed, so nothing was sent.");
+    }
+    await this.reloadTranscriptFromDriver(sessionRef);
+    await this.refreshSessionCommandsFor(sessionRef);
   }
 
   private async publishTreeNavigation(
@@ -2730,6 +2764,7 @@ export class DesktopAppStore {
           selection.workspaceId,
           selection.sessionId,
         ),
+        editingMessageId: this.resolveEditingMessageId(selection.workspaceId, selection.sessionId),
         lastError: this.resolveSelectedSessionError(
           selection.workspaceId,
           selection.sessionId,
@@ -3633,7 +3668,9 @@ export class DesktopAppStore {
           this.updateSessionUsage(event.sessionRef, event.snapshot.usage);
           this.updateLastRunOutcome(event.snapshot);
           this.updateQueuedComposerMessages(event.sessionRef, event.snapshot.queuedMessages);
-          if (event.snapshot.status !== "running") {
+          if (event.snapshot.status === "running") {
+            this.endMessageEditForRun(event.sessionRef);
+          } else {
             this.refreshSessionCommandsCoalesced(event.sessionRef);
           }
           break;
@@ -3654,6 +3691,8 @@ export class DesktopAppStore {
           this.sessionState.sessionUsageBySession.delete(key);
           this.sessionState.queuedComposerMessagesBySession.delete(key);
           this.sessionState.queuedComposerEditsBySession.delete(key);
+          // Puts the earlier draft back rather than leaving the edit's text as the draft.
+          this.conversationOwner.abandonMessageEdit(event.sessionRef);
           this.clearPendingAutoTitle(event.sessionRef);
           this.pendingRuntimeCommandsBySession.delete(key);
           this.reportedCompatibilityIssuesBySession.delete(key);
@@ -4057,6 +4096,10 @@ export class DesktopAppStore {
         state.selectedWorkspaceId,
         state.selectedSessionId,
       ),
+      editingMessageId: this.resolveEditingMessageId(
+        state.selectedWorkspaceId,
+        state.selectedSessionId,
+      ),
       lastError: this.resolveSelectedSessionError(
         state.selectedWorkspaceId,
         state.selectedSessionId,
@@ -4236,8 +4279,14 @@ export class DesktopAppStore {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
       activeView: this.state.activeView,
-      composerDraft: this.state.composerDraft || undefined,
-      composerDraftsBySession: mapToRecord(this.sessionState.composerDraftsBySession),
+      composerDraft: this.persistedSelectedComposerDraft() || undefined,
+      // A thread editing a message is saved with its draft from before Edit.
+      composerDraftsBySession: mapToRecord(
+        draftsToPersist(
+          this.sessionState.composerDraftsBySession,
+          this.sessionState.messageEditsBySession,
+        ),
+      ),
       extensionCommandCompatibilityByWorkspace: serializeCompatibilityByWorkspace(
         this.extensionCommandCompatibilityByWorkspace,
       ),
@@ -4276,11 +4325,24 @@ export class DesktopAppStore {
     await writePersistedUiState(this.uiStateFilePath, payload);
   }
 
+  private persistedSelectedComposerDraft(): string {
+    const selected = this.selectedSessionRef();
+    const edit = selected
+      ? this.sessionState.messageEditsBySession.get(sessionKey(selected))
+      : undefined;
+    return edit ? edit.restoreDraft : this.state.composerDraft;
+  }
+
   async persistComposerAttachments(
     key: string,
     attachments: readonly ComposerAttachment[],
   ): Promise<void> {
-    await this.attachmentStore.write(key, cloneComposerAttachments(attachments));
+    await this.attachmentStore.write(
+      key,
+      cloneComposerAttachments(
+        attachmentsToPersist(attachments, this.sessionState.messageEditsBySession.get(key)),
+      ),
+    );
     await this.persistUiState();
   }
 
@@ -4762,7 +4824,8 @@ export class DesktopAppStore {
   setComposerDraftForSession(
     sessionRef: SessionRef,
     draft: string,
-    source: "persist" | "command" | "extension-editor-text" | "queued-message-edit",
+    source:
+      "persist" | "command" | "extension-editor-text" | "queued-message-edit" | "message-edit",
   ): void {
     const key = sessionKey(sessionRef);
     if (draft) {
@@ -4827,6 +4890,18 @@ export class DesktopAppStore {
     }
 
     return this.sessionState.queuedComposerEditsBySession.get(
+      sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId }),
+    )?.messageId;
+  }
+
+  private resolveEditingMessageId(
+    selectedWorkspaceId: string,
+    selectedSessionId: string,
+  ): string | undefined {
+    if (!selectedWorkspaceId || !selectedSessionId) {
+      return undefined;
+    }
+    return this.sessionState.messageEditsBySession.get(
       sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId }),
     )?.messageId;
   }
@@ -4914,6 +4989,26 @@ export class DesktopAppStore {
     } else {
       this.sessionState.queuedComposerEditsBySession.delete(key);
     }
+  }
+
+  setMessageEditState(sessionRef: SessionRef, editState: MessageEditState | undefined): void {
+    const key = sessionKey(sessionRef);
+    if (editState) {
+      this.sessionState.messageEditsBySession.set(key, editState);
+    } else {
+      this.sessionState.messageEditsBySession.delete(key);
+    }
+  }
+
+  /** A run that starts mid-edit (a scheduled task, a child thread) ends the edit with a notice. */
+  private endMessageEditForRun(sessionRef: SessionRef): void {
+    if (!this.conversationOwner.abandonMessageEdit(sessionRef)) return;
+    this.addExtensionNotice(sessionRef, {
+      id: `message-edit-cancelled:${randomUUID()}`,
+      level: "warning",
+      message: "A run started in this thread, so your message edit was cancelled.",
+      createdAt: new Date().toISOString(),
+    });
   }
 
   getQueuedComposerEditState(sessionRef: SessionRef): QueuedComposerEditState | undefined {

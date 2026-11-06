@@ -51,6 +51,8 @@ Review marks use a separate validated `reviewed-files.json`, keyed by task, chec
 
 Workspace sync, rename, and removal share a per-workspace mutation queue. The queue covers the full scan and catalog replacement. Focus reconciliation rereads the current workspace inside that queue, preserves its name, and skips a removed workspace. Explicit registration can add a workspace again; background metadata touches cannot. Regression tests cover rename preservation and removal during blocked synchronization.
 
+Editing a sent message changes nothing in the session until the edit is sent. The conversation owner keeps the edit (the message's row and Pi entry, plus the draft and attachments it replaced) in memory per thread, so it survives thread switches; Cancel or Esc restores the earlier draft. Sending rewinds with Pi's tree navigation and then sends, so the new message starts a sibling branch. The UI-state and attachment writers save the pre-edit draft while a thread is editing, so a restart ends the edit with the session and that draft intact. A run that starts mid-edit, `/tree` navigation and session close also end the edit and restore the draft.
+
 ## Pi adapter and contracts
 
 `packages/session-driver` owns portable session contracts, `packages/catalogs` owns catalog contracts and backends, and `packages/pi-sdk-driver` adapts them to upstream Pi. Packages cannot depend on desktop implementation, and catalog code cannot depend back on the Pi adapter. [The host-boundary guard](../scripts/check-host-boundary.mjs) resolves imports, including type-only and dynamic edges, to enforce these directions.
