@@ -118,8 +118,10 @@
   text-align: center;
 }
 
+/* Keyboard focus shows the tooltip; a mouse click keeps the button focused without
+   `:focus-visible`, so the tooltip leaves with the pointer instead of sticking. */
 .shortcut-tooltip-wrap:hover .shortcut-tooltip,
-.shortcut-tooltip-wrap:focus-within .shortcut-tooltip {
+.shortcut-tooltip-wrap:has(:focus-visible) .shortcut-tooltip {
   opacity: 1;
   transform: translateX(-50%);
 }
@@ -131,14 +133,16 @@
 }
 
 .topbar__tooltip-wrap:hover .topbar__tooltip,
-.topbar__tooltip-wrap:focus-within .topbar__tooltip {
+.topbar__tooltip-wrap:has(:focus-visible) .topbar__tooltip {
   transform: none;
 }
 
+/* Centred on the traffic lights (`trafficLightPosition` y 18 + 7 = 25px) with a 12px clear gap
+   after the zoom button; see `--titlebar-toggle-left` in sidebar.css. */
 .sidebar-toggle {
   -webkit-app-region: no-drag;
   position: absolute;
-  top: 11px;
+  top: calc(var(--titlebar-control-center-y) - var(--titlebar-toggle-size) / 2);
   left: var(--titlebar-toggle-left);
   z-index: 80;
 }
@@ -301,9 +305,45 @@
   color: var(--error);
 }
 
+/* While the sidebar slides, the title follows it to and from its place beside the toggle. These
+   match from the render that flips `.shell--sidebar-collapsed`, before `SidebarPresence` moves
+   to its sliding state, so the margin change itself is transitioned. */
+.shell:not(.shell--sidebar-collapsed):not(:has(> .sidebar-presence[data-state="open"])) .topbar {
+  transition:
+    margin-left var(--sidebar-slide-in) var(--ease-out),
+    padding-left var(--sidebar-slide-in) var(--ease-out);
+}
+
+.shell--sidebar-collapsed:has(> .sidebar-presence) .topbar {
+  transition:
+    margin-left var(--sidebar-slide-out) var(--ease-out),
+    padding-left var(--sidebar-slide-out) var(--ease-out);
+}
+
 .shell--sidebar-collapsed .topbar {
   margin-left: var(--titlebar-collapsed-main-padding-left);
   padding-left: 0;
+}
+
+/* Reduced motion snaps the title with the sidebar. */
+@media (prefers-reduced-motion: reduce) {
+  .shell:not(.shell--sidebar-collapsed):not(:has(> .sidebar-presence[data-state="open"])) .topbar,
+  .shell--sidebar-collapsed:has(> .sidebar-presence) .topbar {
+    transition: none;
+  }
+}
+
+/* The narrow-window drawer overlays main, so the title keeps its place beside the toggle. */
+@media (max-width: 760px) {
+  .shell .topbar {
+    margin-left: var(--titlebar-collapsed-main-padding-left);
+    padding-left: 0;
+  }
+
+  .shell:not(.shell--sidebar-collapsed):not(:has(> .sidebar-presence[data-state="open"])) .topbar,
+  .shell--sidebar-collapsed:has(> .sidebar-presence) .topbar {
+    transition: none;
+  }
 }
 
 .topbar__title:has(.chat-header__title) .topbar__workspace {

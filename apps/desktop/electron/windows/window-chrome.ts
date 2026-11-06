@@ -1,5 +1,5 @@
-import type { BrowserWindowConstructorOptions } from "electron";
-import { drawWindowControlsArgument } from "../../contracts/ipc";
+import type { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
+import { desktopIpc, drawWindowControlsArgument } from "../../contracts/ipc";
 
 type WindowChromeOptions = Pick<
   BrowserWindowConstructorOptions,
@@ -26,4 +26,19 @@ export function windowChromeOptions(platform: NodeJS.Platform): WindowChromeOpti
 /** Renderer arguments that tell the preload whether to draw window controls. */
 export function windowChromeArguments(platform: NodeJS.Platform): string[] {
   return drawsWindowControls(platform) ? [drawWindowControlsArgument] : [];
+}
+
+/**
+ * Tells the renderer whether the window is in native full screen, after each load and on every
+ * change. macOS hides the traffic lights there, so the title-bar controls move into their space.
+ */
+export function reportFullScreenToRenderer(window: BrowserWindow): void {
+  const send = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send(desktopIpc.fullScreenChanged, window.isFullScreen());
+    }
+  };
+  window.on("enter-full-screen", send);
+  window.on("leave-full-screen", send);
+  window.webContents.on("did-finish-load", send);
 }

@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { desktopIpc } from "../../contracts/ipc";
 import {
   desktopShortcut,
   getDesktopState,
@@ -11,6 +12,13 @@ import {
 } from "../helpers/electron-app";
 
 const NARROW_WINDOW_WIDTH = 1200;
+/** `trafficLightPosition` in `electron/windows/window-chrome.ts`. */
+const TRAFFIC_LIGHTS = { x: 18, y: 18 } as const;
+/** macOS draws three 14px window buttons 9px apart: close, minimize and zoom. */
+const TRAFFIC_LIGHT_SIZE = 14;
+const TRAFFIC_LIGHTS_WIDTH = 3 * TRAFFIC_LIGHT_SIZE + 2 * 9;
+/** The smallest clear gap macOS title-bar controls keep after the zoom button. */
+const MIN_TRAFFIC_LIGHT_GAP = 8;
 const NARROW_WINDOW_HEIGHT = 760;
 
 interface SidebarLayout {
@@ -284,5 +292,241 @@ test("keeps collapsed sidebar out of narrow windows and reopens from the button"
     if (proofDir && video) {
       await video.saveAs(join(proofDir, "narrow-sidebar-reopen-flow.webm"));
     }
+  }
+});
+
+interface ToggleAppearance {
+  readonly background: string;
+  readonly borderColor: string;
+  readonly tooltipOpacity: string;
+  readonly focused: boolean;
+  readonly focusVisible: boolean;
+}
+
+async function readToggleAppearance(button: Locator): Promise<ToggleAppearance> {
+  return button.evaluate((button) => {
+    const tooltip = button.closest(".shortcut-tooltip-wrap")?.querySelector(".shortcut-tooltip");
+    const style = getComputedStyle(button);
+    return {
+      background: style.backgroundColor,
+      borderColor: style.borderColor,
+      tooltipOpacity: tooltip ? getComputedStyle(tooltip).opacity : "missing",
+      focused: document.activeElement === button,
+      focusVisible: button.matches(":focus-visible"),
+    };
+  });
+}
+
+/** Reads the at-rest look once the hover and tooltip transitions settle. */
+async function expectSettledAppearance(
+  button: Locator,
+  expected: Partial<ToggleAppearance>,
+): Promise<ToggleAppearance> {
+  await expect
+    .poll(async () => {
+      const appearance = await readToggleAppearance(button);
+      return Object.fromEntries(
+        Object.keys(expected).map((key) => [key, appearance[key as keyof ToggleAppearance]]),
+      );
+    })
+    .toEqual(expected);
+  return readToggleAppearance(button);
+}
+
+async function expectToggleClearOfTrafficLights(window: Page): Promise<void> {
+  const box = await window.getByTestId("sidebar-toggle").boundingBox();
+  if (!box) throw new Error("Expected the sidebar toggle to be laid out");
+  const zoomRight = TRAFFIC_LIGHTS.x + TRAFFIC_LIGHTS_WIDTH;
+  expect(box.x - zoomRight).toBeGreaterThanOrEqual(MIN_TRAFFIC_LIGHT_GAP);
+  // Centred on the traffic lights' centre line.
+  expect(
+    Math.abs(box.y + box.height / 2 - (TRAFFIC_LIGHTS.y + TRAFFIC_LIGHT_SIZE / 2)),
+  ).toBeLessThan(1);
+}
+
+/** Records every phase `SidebarPresence` passes through while `action` runs. */
+async function recordSidebarPhases(window: Page, action: () => Promise<void>): Promise<string[]> {
+  await window.evaluate(() => {
+    const phases: string[] = [];
+    const record = () => {
+      const presence = document.querySelector(".sidebar-presence");
+      const phase = presence
+        ? `${presence.getAttribute("data-state")}${presence.hasAttribute("inert") ? ":inert" : ""}`
+        : "unmounted";
+      if (phases.at(-1) !== phase) phases.push(phase);
+    };
+    record();
+    const observer = new MutationObserver(record);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-state", "inert"],
+    });
+    Object.assign(globalThis, { sidebarPhases: phases, sidebarPhaseObserver: observer });
+  });
+  await action();
+  return window.evaluate(() => {
+    const scope = globalThis as unknown as {
+      sidebarPhases: string[];
+      sidebarPhaseObserver: MutationObserver;
+    };
+    scope.sidebarPhaseObserver.disconnect();
+    return scope.sidebarPhases;
+  });
+}
+
+test("a mouse click leaves no hover or tooltip behind; keyboard focus still shows them", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspacePath = await makeWorkspace("sidebar-toggle-hover-workspace");
+  const run = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+  try {
+    const window = await run.firstWindow();
+    await waitForWorkspaceByPath(window, workspacePath);
+    const toggle = window.getByTestId("sidebar-toggle");
+    const rest = await expectSettledAppearance(toggle, {
+      tooltipOpacity: "0",
+      focused: false,
+    });
+
+    for (const collapsed of [true, false]) {
+      await toggle.click();
+      await expectSidebarCollapsed(window, collapsed);
+      await window.mouse.move(700, 500);
+      // The click keeps focus on the button, but without `:focus-visible` nothing shows.
+      await expectSettledAppearance(toggle, {
+        background: rest.background,
+        borderColor: rest.borderColor,
+        tooltipOpacity: "0",
+        focused: true,
+        focusVisible: false,
+      });
+    }
+
+    // Keyboard focus shows the focus ring and the tooltip.
+    await toggle.evaluate((button: HTMLElement) => button.blur());
+    await window.keyboard.press("Shift");
+    await toggle.focus();
+    await expectSettledAppearance(toggle, {
+      tooltipOpacity: "1",
+      focused: true,
+      focusVisible: true,
+    });
+    await window.keyboard.press("Enter");
+    await expectSidebarCollapsed(window, true);
+    await expectSettledAppearance(toggle, {
+      tooltipOpacity: "1",
+      focusVisible: true,
+    });
+    await window.keyboard.press("Enter");
+    await expectSidebarCollapsed(window, false);
+
+    // Other shortcut-tooltip buttons share the rule: Customize Sidebar keeps focus after its menu.
+    const customize = window.getByRole("button", { name: "Customize Sidebar", exact: true });
+    await customize.click();
+    await expect(customize).toHaveAttribute("aria-expanded", "true");
+    await customize.click();
+    await expect(customize).toHaveAttribute("aria-expanded", "false");
+    await window.mouse.move(700, 500);
+    await expectSettledAppearance(customize, {
+      tooltipOpacity: "0",
+      focused: true,
+      focusVisible: false,
+    });
+  } finally {
+    await run.close();
+  }
+});
+
+test("the toggle keeps clear of the traffic lights and slides the sidebar", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspacePath = await makeWorkspace("sidebar-toggle-geometry-workspace");
+  const run = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+  try {
+    const window = await run.firstWindow();
+    await waitForWorkspaceByPath(window, workspacePath);
+    await expectToggleClearOfTrafficLights(window);
+
+    const closing = await recordSidebarPhases(window, async () => {
+      await window.getByTestId("sidebar-toggle").click();
+      await expectSidebarCollapsed(window, true);
+    });
+    // The sidebar stays mounted but inert while it slides out, then unmounts.
+    expect(closing).toEqual(["open", "closing:inert", "unmounted"]);
+    await expectToggleClearOfTrafficLights(window);
+    await expectToggleClearOfTopbarDragRegion(window);
+
+    const opening = await recordSidebarPhases(window, async () => {
+      await window.keyboard.press(desktopShortcut("B"));
+      await expect(window.locator(".sidebar-presence")).toHaveAttribute("data-state", "open");
+    });
+    expect(opening).toEqual(["unmounted", "opening", "open"]);
+    await expectSidebarCollapsed(window, false);
+    await expect(window.locator(".sidebar")).not.toHaveAttribute("inert");
+
+    if (process.platform === "darwin") {
+      // Main reports native full screen, where macOS hides the traffic lights. The window is
+      // hidden in background mode, so this sends main's report rather than entering full screen.
+      const sendFullScreen = (fullScreen: boolean) =>
+        run.electronApp.evaluate(
+          ({ BrowserWindow }, input) =>
+            BrowserWindow.getAllWindows()[0]?.webContents.send(input.channel, input.fullScreen),
+          { channel: desktopIpc.fullScreenChanged, fullScreen },
+        );
+      await sendFullScreen(true);
+      await expect
+        .poll(async () => (await window.getByTestId("sidebar-toggle").boundingBox())?.x)
+        .toBe(12);
+      await window.getByTestId("sidebar-toggle").click();
+      await expectSidebarCollapsed(window, true);
+      await expectToggleClearOfTopbarDragRegion(window);
+      await sendFullScreen(false);
+      await expectToggleClearOfTrafficLights(window);
+      await expectToggleClearOfTopbarDragRegion(window);
+    }
+  } finally {
+    await run.close();
+  }
+});
+
+test("reduced motion collapses and expands the sidebar without sliding", async () => {
+  const userDataDir = await makeUserDataDir();
+  const workspacePath = await makeWorkspace("sidebar-toggle-reduced-motion-workspace");
+  const run = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+  try {
+    const window = await run.firstWindow();
+    await waitForWorkspaceByPath(window, workspacePath);
+    await window.emulateMedia({ reducedMotion: "reduce" });
+
+    const closing = await recordSidebarPhases(window, async () => {
+      await window.getByTestId("sidebar-toggle").click();
+      await expectSidebarCollapsed(window, true);
+    });
+    expect(closing).toEqual(["open", "unmounted"]);
+
+    const opening = await recordSidebarPhases(window, async () => {
+      await window.getByTestId("sidebar-toggle").click();
+      await expectSidebarCollapsed(window, false);
+    });
+    expect(opening).toEqual(["unmounted", "open"]);
+    const sliding = await window.evaluate(() =>
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().progress !== null)
+        .map((animation) => (animation as CSSTransition).transitionProperty),
+    );
+    expect(sliding).not.toContain("margin-left");
+    expect(sliding).not.toContain("transform");
+  } finally {
+    await run.close();
   }
 });

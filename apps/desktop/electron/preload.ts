@@ -114,6 +114,15 @@ function subscribeIpc<T>(channel: string, listener: (payload: T) => void): () =>
   };
 }
 
+// Main reports full screen after load and on every change; keep the latest value so a
+// subscriber that mounts later still starts from the window's real state.
+let fullScreen = false;
+const fullScreenListeners = new Set<(fullScreen: boolean) => void>();
+ipcRenderer.on(desktopIpc.fullScreenChanged, (_event, value: unknown) => {
+  fullScreen = value === true;
+  for (const listener of fullScreenListeners) listener(fullScreen);
+});
+
 const pendingDraftFlushHandlers = new Set<() => Promise<void>>();
 ipcRenderer.on(desktopIpc.flushPendingComposerDraft, (_event, requestId: number) => {
   // Always acknowledge, even with no handler, so main never waits out its bound needlessly.
@@ -148,6 +157,13 @@ contextBridge.exposeInMainWorld("piApp", {
     subscribeIpc(desktopIpc.browserChanged, listener),
   platform: process.platform,
   drawsWindowControls: process.argv.includes(drawWindowControlsArgument),
+  onFullScreenChanged: (listener: (fullScreen: boolean) => void) => {
+    fullScreenListeners.add(listener);
+    listener(fullScreen);
+    return () => {
+      fullScreenListeners.delete(listener);
+    };
+  },
   versions: process.versions,
   ping: () => ipcRenderer.invoke(desktopIpc.ping) as Promise<string>,
   getState: () => ipcRenderer.invoke(desktopIpc.stateRequest) as Promise<DesktopAppState>,

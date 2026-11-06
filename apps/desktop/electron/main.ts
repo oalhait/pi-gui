@@ -36,7 +36,11 @@ import { DesktopAppStore } from "./application/app-store";
 import { TOOL_IMAGE_SCHEME } from "../contracts/tool-output-images";
 import { WindowOwner } from "./windows/window-owner";
 import { PendingComposerDraftFlusher } from "./windows/pending-draft-flush";
-import { windowChromeArguments, windowChromeOptions } from "./windows/window-chrome";
+import {
+  reportFullScreenToRenderer,
+  windowChromeArguments,
+  windowChromeOptions,
+} from "./windows/window-chrome";
 import { TurnCheckpointStore } from "./workbench/checkpoint-store";
 import {
   DesktopExtensionViewOwner,
@@ -598,6 +602,7 @@ function createWindow(): BrowserWindow {
         console.error("[main] Closing the window after its draft flush failed", error);
       });
   });
+  reportFullScreenToRenderer(window);
   window.once("ready-to-show", () => {
     if (!backgroundTestMode) {
       window.show();

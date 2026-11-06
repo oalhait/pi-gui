@@ -145,6 +145,7 @@ export const desktopIpc = {
   appCommand: "pi-gui:app-command",
   workspacePicked: "pi-gui:workspace-picked",
   clipboardImagePasted: "pi-gui:clipboard-image-pasted",
+  fullScreenChanged: "pi-gui:full-screen-changed",
   addWorkspacePath: "pi-gui:add-workspace-path",
   pickWorkspace: "pi-gui:pick-workspace",
   selectWorkspace: "pi-gui:select-workspace",
@@ -775,6 +776,11 @@ export interface PiDesktopApi {
   platform: NodeJS.Platform;
   /** True when the window has no native title bar and the app draws its own. */
   drawsWindowControls: boolean;
+  /**
+   * Calls `listener` with whether the window is in native full screen, now and on every change.
+   * macOS hides the traffic lights there, so title-bar controls can move into their space.
+   */
+  onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void;
   versions: NodeJS.ProcessVersions;
   ping(): Promise<string>;
   getState(): Promise<DesktopAppState>;
