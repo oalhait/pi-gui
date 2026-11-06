@@ -182,13 +182,11 @@ test("a new workspace cannot silently receive only syntax lint", async () => {
   );
   const { readFileSync } = await import("node:fs");
   const configPath = path.join(registered, "eslint.config.mjs");
-  writeFileSync(
-    configPath,
-    readFileSync(configPath, "utf8").replace(
-      '...["catalogs", "pi-sdk-driver", "session-driver", "extension-ui"]',
-      '...["catalogs", "pi-sdk-driver", "session-driver", "extension-ui", "new-feature"]',
-    ),
-  );
+  const config = readFileSync(configPath, "utf8");
+  // Register the fixture beside extension-ui in the typed package list, however it is wrapped.
+  const registeredConfig = config.replace(/("extension-ui",?)(\s*)/, '$1$2"new-feature",$2');
+  assert.notEqual(registeredConfig, config, "the typed package list was found");
+  writeFileSync(configPath, registeredConfig);
   mkdirSync(path.join(registeredWorkspace, "src"));
   const source = path.join(registeredWorkspace, "src/index.ts");
   writeFileSync(source, "async function save() { return 1; } save(); export {};\n");
