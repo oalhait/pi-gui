@@ -138,7 +138,7 @@
 .sidebar-toggle {
   -webkit-app-region: no-drag;
   position: absolute;
-  top: 11px;
+  top: var(--titlebar-toggle-top);
   left: var(--titlebar-toggle-left);
   z-index: 80;
 }

@@ -167,15 +167,33 @@ test("supports keyboard shortcuts, slash menus, and topbar controls through the 
     const appRegions = await window.evaluate(() => {
       const topbar = document.querySelector<HTMLElement>("[data-testid='topbar']");
       const actionButton = document.querySelector<HTMLElement>(".topbar__actions button");
+      const region = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        return element ? getComputedStyle(element).getPropertyValue("-webkit-app-region") : "";
+      };
       return {
         topbar: topbar ? getComputedStyle(topbar).getPropertyValue("-webkit-app-region") : "",
         actionButton: actionButton
           ? getComputedStyle(actionButton).getPropertyValue("-webkit-app-region")
           : "",
+        sidebar: region(".sidebar"),
+        sidebarNew: region(".sidebar__new"),
+        sidebarNavItem: region(".sidebar__nav-item"),
+        sidebarList: region(".sidebar__section"),
+        // The toggle precedes the sidebar in DOM order, so the sidebar keeps a no-drag hole under it.
+        sidebarToggleHole: getComputedStyle(
+          document.querySelector(".sidebar")!,
+          "::before",
+        ).getPropertyValue("-webkit-app-region"),
       };
     });
     expect(appRegions.topbar).toBe("drag");
     expect(appRegions.actionButton).toBe("no-drag");
+    expect(appRegions.sidebar).toBe("drag");
+    expect(appRegions.sidebarNew).toBe("no-drag");
+    expect(appRegions.sidebarNavItem).toBe("no-drag");
+    expect(appRegions.sidebarList).toBe("no-drag");
+    expect(appRegions.sidebarToggleHole).toBe("no-drag");
 
     const maximizedBefore = await harness.electronApp.evaluate(({ BrowserWindow }) => {
       return BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false;

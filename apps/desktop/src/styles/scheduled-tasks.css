@@ -99,6 +99,7 @@
 }
 
 .scheduled-editor-backdrop {
+  -webkit-app-region: no-drag;
   position: fixed;
   inset: var(--window-titlebar-height) 0 0;
   z-index: 44;

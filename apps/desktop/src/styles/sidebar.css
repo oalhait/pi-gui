@@ -1,5 +1,6 @@
 .shell {
   --sidebar-width: 236px;
+  --titlebar-toggle-top: 11px;
   --titlebar-toggle-left: 86px;
   --titlebar-toggle-size: 30px;
   --titlebar-toggle-main-gap: 16px;
@@ -31,6 +32,9 @@
 }
 
 .sidebar {
+  /* Empty sidebar chrome moves the window, like the topbar. Controls and the
+   * scrolling thread list opt out below so they stay clickable. */
+  -webkit-app-region: drag;
   position: relative;
   /* A remembered width never crowds out the main area on a smaller window. */
   width: min(var(--sidebar-width), 45vw);
@@ -39,6 +43,20 @@
   overflow: hidden;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
+}
+
+/* Electron applies app regions in DOM order, so the sidebar's drag region would
+ * swallow clicks on the toggle button that precedes it. Punch a no-drag hole
+ * where the toggle sits. */
+.sidebar::before {
+  -webkit-app-region: no-drag;
+  content: "";
+  position: absolute;
+  top: var(--titlebar-toggle-top);
+  left: var(--titlebar-toggle-left);
+  width: var(--titlebar-toggle-size);
+  height: var(--titlebar-toggle-size);
+  pointer-events: none;
 }
 
 .enable-transparency .sidebar {
@@ -62,6 +80,7 @@
 }
 
 .sidebar__nav-item {
+  -webkit-app-region: no-drag;
   width: 100%;
   min-height: 30px;
   padding: 6px 8px;
@@ -111,6 +130,7 @@
 }
 
 .sidebar__section {
+  -webkit-app-region: no-drag;
   overflow: auto;
   /* Keeps the scrollbar clear of the resize handle on the right edge. */
   margin-right: 4px;
@@ -155,6 +175,8 @@
 
 .workspace-menu.thread-grouping__menu,
 .workspace-menu.thread-grouping__submenu {
+  /* Portaled to <body>, so it does not inherit the list's no-drag. */
+  -webkit-app-region: no-drag;
   position: fixed;
   top: auto;
   right: auto;
