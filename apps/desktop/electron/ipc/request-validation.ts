@@ -85,6 +85,14 @@ export function expectOptionalString(value: unknown, name: string): string | und
   return value === undefined ? undefined : expectString(value, name);
 }
 
+/** Model stall timeout in whole seconds: 0 (off) up to an hour. */
+export function expectStallSeconds(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 3_600) {
+    throw new TypeError("seconds must be a whole number from 0 to 3600");
+  }
+  return value;
+}
+
 export function expectBoolean(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${name} must be a boolean`);

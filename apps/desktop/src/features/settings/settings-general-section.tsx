@@ -3,13 +3,18 @@ import type { RuntimeSnapshot } from "@pi-gui/session-driver/runtime-types";
 import type { ModelSettingsScopeMode } from "../../../contracts/desktop-state";
 import { useTranslation } from "../../i18n";
 import { useThinkingDisplay } from "../conversation/thinking-display";
-import { SettingsSegmented, SettingsSwitch } from "./settings-controls";
+import { SettingsSegmented, SettingsSelect, SettingsSwitch } from "./settings-controls";
 import { SettingsGroup, SettingsRow } from "./settings-utils";
+
+/** Seconds offered for the stall detector; 0 turns it off. */
+const MODEL_STALL_CHOICES = [0, 60, 120, 180, 300];
 
 interface SettingsGeneralSectionProps {
   readonly runtime?: RuntimeSnapshot;
   readonly modelSettingsScopeMode: ModelSettingsScopeMode;
   readonly integratedTerminalShell: string;
+  readonly modelStallTimeoutSeconds: number;
+  readonly onSetModelStallTimeout: (seconds: number) => void;
   readonly onSetModelSettingsScopeMode: (mode: ModelSettingsScopeMode) => void;
   readonly onSetIntegratedTerminalShell: (shellPath: string) => void;
   readonly onToggleSkillCommands: (enabled: boolean) => void;
@@ -19,6 +24,8 @@ export function SettingsGeneralSection({
   runtime,
   modelSettingsScopeMode,
   integratedTerminalShell,
+  modelStallTimeoutSeconds,
+  onSetModelStallTimeout,
   onSetModelSettingsScopeMode,
   onSetIntegratedTerminalShell,
   onToggleSkillCommands,
@@ -80,6 +87,27 @@ export function SettingsGeneralSection({
             ]}
             value={thinkingDisplay}
             onChange={setThinkingDisplay}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t("settings.general.modelStall.title")}
+          description={t("settings.general.modelStall.description")}
+        >
+          <SettingsSelect
+            label={t("settings.general.modelStall.label")}
+            options={[...new Set([...MODEL_STALL_CHOICES, modelStallTimeoutSeconds])]
+              .sort((a, b) => a - b)
+              .map((seconds) => ({
+                value: String(seconds),
+                label:
+                  seconds === 0
+                    ? t("settings.general.modelStall.off")
+                    : seconds % 60 === 0
+                      ? t("settings.general.modelStall.minutes", { minutes: seconds / 60 })
+                      : t("settings.general.modelStall.seconds", { seconds }),
+              }))}
+            value={String(modelStallTimeoutSeconds)}
+            onChange={(value) => onSetModelStallTimeout(Number(value))}
           />
         </SettingsRow>
       </SettingsGroup>

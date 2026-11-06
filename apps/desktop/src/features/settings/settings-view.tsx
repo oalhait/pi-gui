@@ -38,6 +38,8 @@ interface SettingsViewProps {
   readonly notificationPermissionPending: boolean;
   readonly modelSettingsScopeMode: ModelSettingsScopeMode;
   readonly integratedTerminalShell: string;
+  readonly modelStallTimeoutSeconds: number;
+  readonly onSetModelStallTimeout: (seconds: number) => void;
   readonly themeMode: "system" | "light" | "dark";
   readonly themePresetId: ThemePresetId;
   readonly enableTransparency: boolean;
@@ -76,6 +78,8 @@ export function SettingsView({
   notificationPermissionPending,
   modelSettingsScopeMode,
   integratedTerminalShell,
+  modelStallTimeoutSeconds,
+  onSetModelStallTimeout,
   themeMode,
   themePresetId,
   enableTransparency,
@@ -157,6 +161,8 @@ export function SettingsView({
               runtime={runtime}
               modelSettingsScopeMode={modelSettingsScopeMode}
               integratedTerminalShell={integratedTerminalShell}
+              modelStallTimeoutSeconds={modelStallTimeoutSeconds}
+              onSetModelStallTimeout={onSetModelStallTimeout}
               onSetModelSettingsScopeMode={onSetModelSettingsScopeMode}
               onSetIntegratedTerminalShell={onSetIntegratedTerminalShell}
               onToggleSkillCommands={onToggleSkillCommands}

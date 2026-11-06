@@ -56,6 +56,7 @@ import {
   expectSessionTarget,
   expectRecord,
   expectSetChildSupervisionLoopInput,
+  expectStallSeconds,
   expectStartThreadInput,
   expectCreateScheduledTaskInput,
   expectUpdateScheduledTaskInput,
@@ -168,6 +169,7 @@ type SettingsOwner = Pick<
   | "setCodemodeAlwaysOn"
   | "setNotificationPreferences"
   | "setIntegratedTerminalShell"
+  | "setModelStallTimeout"
   | "setEnableTransparency"
   | "getSkillFilePath"
   | "getExtensionFilePath"
@@ -698,6 +700,9 @@ export function registerDesktopIpc({
     run(event, () =>
       owners.settings.setIntegratedTerminalShell(expectString(rawShellPath, "shellPath")),
     ),
+  );
+  ipcMain.handle(desktopIpc.setModelStallTimeout, (event, rawSeconds: unknown) =>
+    run(event, () => owners.settings.setModelStallTimeout(expectStallSeconds(rawSeconds))),
   );
   ipcMain.handle(desktopIpc.setEnableTransparency, async (event, rawEnabled: unknown) => {
     const window = senderWindow(windows, event);

@@ -28,6 +28,7 @@ export type {
   SessionDriver,
   SessionDriverEvent,
   SessionConnectionRetry,
+  SessionModelRequest,
   SessionModelRetry,
   SessionModelWait,
   SessionErrorInfo,

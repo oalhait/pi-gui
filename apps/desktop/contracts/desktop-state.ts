@@ -506,6 +506,11 @@ export interface DesktopAppState {
   readonly scheduledTasks: readonly ScheduledTaskRecord[];
   readonly notificationPreferences: NotificationPreferences;
   readonly integratedTerminalShell: string;
+  /**
+   * Seconds a model request may go without output before pi-gui ends it as stalled and Pi
+   * retries it once; 0 turns that off.
+   */
+  readonly modelStallTimeoutSeconds: number;
   readonly lastViewedAtBySession: Readonly<Record<string, string>>;
   readonly lastInteractedAtBySession: Readonly<Record<string, string>>;
   readonly pinnedAtBySession: Readonly<Record<string, string>>;
@@ -563,6 +568,7 @@ export function createEmptyDesktopAppState(): DesktopAppState {
       attentionNeeded: true,
     },
     integratedTerminalShell: "",
+    modelStallTimeoutSeconds: 120,
     lastViewedAtBySession: {},
     lastInteractedAtBySession: {},
     pinnedAtBySession: {},

@@ -75,6 +75,7 @@ import { ThemeManager } from "./platform/theme-manager";
 import { EditorService } from "./platform/editors/editor-service";
 import { windowBackgroundFor } from "../contracts/theme";
 import { TerminalService } from "./platform/terminal-service";
+import { RunsLog } from "./platform/runs-log";
 import type { DesktopAppState, DesktopAppViewState } from "../contracts/desktop-state";
 import {
   desktopCommands,
@@ -774,6 +775,24 @@ function testConnectionResumePolicy(): { policy?: ConnectionResumePolicy } {
   return { policy: { delaysMs, budgetMs: 60_000, onlinePollMs: 100 } };
 }
 
+/** Core tests shorten the stall detector; `PI_APP_TEST_MODEL_STALL_MS=1500`. */
+function testModelStallTimeout(): { modelStallTimeoutMs?: () => number } {
+  const ms = appTestMode ? Number(process.env.PI_APP_TEST_MODEL_STALL_MS) : Number.NaN;
+  return Number.isFinite(ms) && ms >= 0 ? { modelStallTimeoutMs: () => ms } : {};
+}
+
+/**
+ * ~/Library/Logs/pi-gui on macOS, Electron's logs folder elsewhere; tests keep it in their
+ * userData. See platform/runs-log.ts.
+ */
+function runsLogDirectory(userDataDir: string): string {
+  if (appTestMode) return path.join(userDataDir, "logs");
+  if (process.platform === "darwin") {
+    return path.join(app.getPath("home"), "Library", "Logs", "pi-gui");
+  }
+  return app.getPath("logs");
+}
+
 function resolveAppTestMode(value: string | undefined): "foreground" | "background" | undefined {
   return value === "foreground" || value === "background" ? value : undefined;
 }
@@ -1069,6 +1088,7 @@ app
     const orchestrationRuntimeBridge = createStoreBackedOrchestrationRuntimeBridge();
     const scheduledTaskRuntimeBridge = createStoreBackedScheduledTaskRuntimeBridge();
     const checkpoints = new TurnCheckpointStore(configuredUserDataDir);
+    const runsLog = new RunsLog({ directory: runsLogDirectory(configuredUserDataDir) });
     const extensionViews: DesktopExtensionViewOwner = new DesktopExtensionViewOwner({
       frameDocument: extensionFrameDocument,
       hostAssets: {
@@ -1120,6 +1140,9 @@ app
         isOnline: () => net.isOnline(),
         ...testConnectionResumePolicy(),
       },
+      // Metadata about each run and model request, for explaining a stuck "Waiting for the model".
+      onRunDiagnostic: (diagnostic) => runsLog.record(diagnostic),
+      ...testModelStallTimeout(),
       desktopExtensions: {
         onChanged: (runtime) => extensionViews.replaceRuntime(runtime),
         onInvalidated: ({ target, generation }) =>

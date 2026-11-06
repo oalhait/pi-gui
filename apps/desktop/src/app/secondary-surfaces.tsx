@@ -339,6 +339,14 @@ export function SecondarySurfaces({
     );
   };
 
+  const handleSetModelStallTimeout = (seconds: number) => {
+    void updateSnapshot(setSnapshot, () => api.setModelStallTimeout(seconds)).catch(
+      (error: unknown) => {
+        console.error("[renderer] setModelStallTimeout failed", error);
+      },
+    );
+  };
+
   const handleRequestNotificationPermission = () => {
     if (!api.requestNotificationPermission) {
       return;
@@ -459,6 +467,8 @@ export function SecondarySurfaces({
           notificationPermissionPending={notificationPermissionPending}
           modelSettingsScopeMode={snapshot.modelSettingsScopeMode}
           integratedTerminalShell={snapshot.integratedTerminalShell}
+          modelStallTimeoutSeconds={snapshot.modelStallTimeoutSeconds}
+          onSetModelStallTimeout={handleSetModelStallTimeout}
           themeMode={snapshot.themeMode}
           themePresetId={snapshot.themePresetId}
           enableTransparency={snapshot.enableTransparency}

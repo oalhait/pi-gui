@@ -58,3 +58,42 @@ test("provider errors shorten to a reason", () => {
   expect(retryReason("Something odd")).toBe("Something odd");
   expect(retryReason("x".repeat(100))).toHaveLength(60);
 });
+
+test("the wait says whether the provider has accepted the request, and counts its pings", () => {
+  expect(
+    modelWaitText({ since, request: { phase: "sending", pings: 0 } }, undefined, after(5_000)),
+  ).toEqual({ label: "Waiting for the provider to respond · 5s", notes: [] });
+  expect(
+    modelWaitText(
+      { since, request: { phase: "accepted", status: 200, pings: 0 } },
+      undefined,
+      after(5_000),
+    ).label,
+  ).toBe("Request accepted, waiting for the model · 5s");
+  expect(
+    modelWaitText(
+      { since, request: { phase: "accepted", status: 200, pings: 3 } },
+      undefined,
+      after(5_000),
+    ).label,
+  ).toBe("Request accepted, 3 keep-alive pings, waiting for the model · 5s");
+});
+
+test("a slow wait says when the stall detector will retry the request", () => {
+  const stallAt = new Date(after(120_000)).toISOString();
+  const request = { phase: "accepted" as const, status: 200, pings: 1, stallAt };
+  expect(modelWaitText({ since, request }, undefined, after(75_000)).notes).toEqual([
+    "No output yet. If nothing arrives in 45s, pi-gui ends this request and retries it once.",
+  ]);
+  expect(modelWaitText({ since, request }, undefined, after(121_000)).notes).toEqual([
+    "No output yet. Ending this request to retry it…",
+  ]);
+});
+
+test("a stalled request's retry gives the stall as its reason", () => {
+  expect(
+    retryReason(
+      "The model stalled: no output for 120s after the request was sent. Request timed out.",
+    ),
+  ).toBe("no output from the model");
+});

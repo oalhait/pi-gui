@@ -197,6 +197,13 @@ export const en = {
   "settings.general.thinking.expanded": "Expanded",
   "settings.general.thinking.collapsed": "Collapsed",
   "settings.general.thinking.hidden": "Hidden",
+  "settings.general.modelStall.title": "Retry a stalled model request",
+  "settings.general.modelStall.description":
+    "When the provider accepts a request but the model sends nothing for this long, pi-gui ends that request and retries it once. A second stall in a row stops the run with an error.",
+  "settings.general.modelStall.label": "Retry a stalled model request after",
+  "settings.general.modelStall.off": "Never",
+  "settings.general.modelStall.seconds": "{seconds} seconds",
+  "settings.general.modelStall.minutes": "{minutes} min",
   "settings.general.groupTerminal": "Terminal",
   "settings.general.shell.title": "Shell",
   "settings.general.shell.description":

@@ -478,6 +478,9 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
       a.modelWait?.since === b.modelWait?.since &&
       a.modelWait?.retry?.attempt === b.modelWait?.retry?.attempt &&
       a.modelWait?.retry?.retryAt === b.modelWait?.retry?.retryAt &&
+      a.modelWait?.request?.phase === b.modelWait?.request?.phase &&
+      a.modelWait?.request?.pings === b.modelWait?.request?.pings &&
+      a.modelWait?.request?.stallAt === b.modelWait?.request?.stallAt &&
       a.largeContext?.tokens === b.largeContext?.tokens &&
       a.largeContext?.cacheExpired === b.largeContext?.cacheExpired
     );

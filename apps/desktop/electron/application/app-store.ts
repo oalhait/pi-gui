@@ -95,6 +95,7 @@ import {
   writePersistedUiState,
 } from "../persistence/app-store-persistence";
 import { AttachmentStore } from "../persistence/attachment-store";
+import { readRunSettings, writeRunSettings } from "../persistence/run-settings-store";
 import {
   type PendingRuntimeCommandExecution,
   getLearnedCommandCompatibility,
@@ -191,6 +192,8 @@ export interface DesktopAppStoreOptions {
     | "builtinExtensions"
     | "connectionResume"
     | "desktopExtensions"
+    | "modelStallTimeoutMs"
+    | "onRunDiagnostic"
     | "onTurnCaptureBoundary"
     | "openUrl"
     | "turnCaptureTimeoutMs"
@@ -261,6 +264,7 @@ export class DesktopAppStore {
   private readonly worktreeRoot: string;
   private readonly isAppWorktreePath: (path: string) => Promise<boolean>;
   private readonly uiStateFilePath: string;
+  private readonly userDataDir: string;
   private readonly scheduledTasksFilePath: string;
   private scheduledTasksWritable = false;
   private readonly attachmentStore: AttachmentStore;
@@ -308,6 +312,9 @@ export class DesktopAppStore {
       catalogStorage: this.catalogStore,
       ...(options.driverOptions ?? {}),
       isBuiltinExtensionEnabled: (name) => !this.disabledBuiltinExtensions.has(name),
+      modelStallTimeoutMs:
+        options.driverOptions?.modelStallTimeoutMs ??
+        (() => this.state.modelStallTimeoutSeconds * 1000),
       extensionFlagValuesForSession: (sessionRef) =>
         this.sessionState.extensionFlagsBySession.get(sessionKey(sessionRef)),
       ...(options.generateThreadTitleOverride
@@ -323,6 +330,7 @@ export class DesktopAppStore {
       isAppWorktreePath: this.isAppWorktreePath,
     });
     this.uiStateFilePath = join(options.userDataDir, "ui-state.json");
+    this.userDataDir = options.userDataDir;
     this.scheduledTasksFilePath = join(options.userDataDir, "scheduled-tasks.json");
     this.attachmentStore = new AttachmentStore(options.userDataDir);
     this.initialWorkspacePaths = options.initialWorkspacePaths;
@@ -1567,6 +1575,21 @@ export class DesktopAppStore {
     return this.emit();
   }
 
+  async setModelStallTimeout(seconds: number): Promise<DesktopAppState> {
+    await this.initialize();
+    if (this.state.modelStallTimeoutSeconds === seconds) {
+      return structuredClone(this.state);
+    }
+    await writeRunSettings(this.userDataDir, { modelStallTimeoutSeconds: seconds });
+    this.state = {
+      ...this.state,
+      modelStallTimeoutSeconds: seconds,
+      lastError: undefined,
+      revision: this.state.revision + 1,
+    };
+    return this.emit();
+  }
+
   async setEnableTransparency(enabled: boolean): Promise<DesktopAppState> {
     await this.initialize();
     if (this.state.enableTransparency === enabled) {
@@ -2216,6 +2239,11 @@ export class DesktopAppStore {
       this.emit();
       return;
     }
+    const runSettings = await readRunSettings(this.userDataDir);
+    this.state = {
+      ...this.state,
+      modelStallTimeoutSeconds: runSettings.modelStallTimeoutSeconds,
+    };
     try {
       this.restorePersistedUiState(persisted);
     } catch (error) {

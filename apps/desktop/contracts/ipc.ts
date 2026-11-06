@@ -209,6 +209,7 @@ export const desktopIpc = {
   respondToHostUiRequest: "pi-gui:respond-to-host-ui-request",
   setNotificationPreferences: "pi-gui:set-notification-preferences",
   setIntegratedTerminalShell: "pi-gui:set-integrated-terminal-shell",
+  setModelStallTimeout: "pi-gui:set-model-stall-timeout",
   setEnableTransparency: "pi-gui:set-enable-transparency",
   terminalEnsurePanel: "pi-gui:terminal-ensure-panel",
   terminalGetPanel: "pi-gui:terminal-get-panel",
@@ -899,6 +900,7 @@ export interface PiDesktopApi {
     preferences: Partial<NotificationPreferences>,
   ): Promise<DesktopAppState>;
   setIntegratedTerminalShell(shell: string): Promise<DesktopAppState>;
+  setModelStallTimeout(seconds: number): Promise<DesktopAppState>;
   setEnableTransparency(enabled: boolean): Promise<DesktopAppState>;
   setThemePresetId(presetId: ThemePresetId): Promise<DesktopAppState>;
   ensureTerminalPanel(
