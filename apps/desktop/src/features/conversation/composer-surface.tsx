@@ -30,6 +30,7 @@ import {
 } from "../../ui/icons";
 import { ImageAttachmentThumb } from "./image-attachment-thumb";
 import { QueuedComposerMessages } from "./queued-composer-messages";
+import { handleComposerListKeyDown } from "./composer-list-keydown";
 
 type ExtensionMentionOption = Extract<MentionOption, { kind: "extension" }>;
 type FileMentionOption = Extract<MentionOption, { kind: "file" }>;
@@ -405,7 +406,12 @@ export function ComposerSurface({
           onChange={(event) => {
             setComposerDraft(event.target.value);
           }}
-          onKeyDown={onComposerKeyDown}
+          onKeyDown={(event) => {
+            // Open menus own Enter/Tab; list editing only runs once they are closed.
+            const menuOpen = showMentionMenu || showSlashMenu || showSlashOptionMenu;
+            if (!menuOpen && handleComposerListKeyDown(event)) return;
+            onComposerKeyDown(event);
+          }}
           placeholder={textareaPlaceholder}
         />
         <div className="composer__bar">{footer}</div>
