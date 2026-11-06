@@ -520,18 +520,6 @@ export default function App() {
     onRunTreeCommand: openTreeModal,
   });
 
-  const enableSelectedMentionExtension = useCallback(
-    (filePath: string) => {
-      if (!api || !selectedWorkspace) {
-        return Promise.resolve();
-      }
-      return updateSnapshot(setSnapshot, () =>
-        api.setExtensionEnabled(selectedWorkspace.id, filePath, true),
-      ).then(() => undefined);
-    },
-    [api, selectedWorkspace],
-  );
-
   const mentionMenu = useMentionMenu({
     composerDraft,
     setComposerDraft,
@@ -539,7 +527,9 @@ export default function App() {
     workspaceId: selectedWorkspace?.id,
     runtime: selectedRuntime,
     api,
-    onEnableExtension: enableSelectedMentionExtension,
+    snapshot,
+    sessionId: selectedSession?.id,
+    setSnapshot,
   });
 
   const wsMenu = useWorkspaceMenu({
@@ -615,6 +605,7 @@ export default function App() {
     appendNewThreadAttachment: newThread.appendAttachment,
     onNewThreadComposerError: newThread.setComposerError,
     annotations: transcriptAnnotations,
+    threadMentionTargets: mentionMenu.threadTargets,
   });
 
   useEffect(() => {

@@ -12,6 +12,7 @@ import type {
 } from "../../contracts/desktop-state";
 import { toSessionRef } from "../application/app-store-utils";
 import { assertComposerAttachmentsAccepted } from "../../contracts/composer-attachments";
+import { stripThreadReferences } from "../../contracts/thread-references";
 import {
   formatSessionConfigStatus,
   composerSubmitNeedsSenderView,
@@ -323,7 +324,12 @@ async function editQueuedComposerMessage(
       store.conversationState.composerAttachmentsBySession.get(key) ?? [],
     ),
   });
-  store.setComposerDraftForSession(sessionRef, message.text, "queued-message-edit");
+  // The composer shows the readable @mentions; sending adds the thread ids back.
+  store.setComposerDraftForSession(
+    sessionRef,
+    stripThreadReferences(message.text),
+    "queued-message-edit",
+  );
   store.conversationState.composerAttachmentsBySession.set(
     key,
     cloneComposerAttachments(message.attachments),

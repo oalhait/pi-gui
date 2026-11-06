@@ -24,6 +24,10 @@ import { parseTreeComposerCommand } from "../composer-commands";
 import { formatAnnotatedPrompt } from "../annotations/annotation-prompt";
 import type { TranscriptAnnotations } from "../annotations/use-transcript-annotations";
 import type { PiDesktopApi } from "../../../../contracts/ipc";
+import {
+  withThreadReferences,
+  type ThreadMentionTarget,
+} from "../../../../contracts/thread-references";
 
 interface UseSessionComposerParams {
   readonly api: PiDesktopApi | undefined;
@@ -44,6 +48,8 @@ interface UseSessionComposerParams {
   readonly appendNewThreadAttachment: (attachment: ComposerImageAttachment) => void;
   readonly onNewThreadComposerError: (message: string) => void;
   readonly annotations: TranscriptAnnotations;
+  /** Threads an `@title` in the draft can refer to; their ids travel with the message. */
+  readonly threadMentionTargets: readonly ThreadMentionTarget[];
 }
 
 const EMPTY_ID_SET: ReadonlySet<string> = new Set();
@@ -67,6 +73,7 @@ export function useSessionComposer(params: UseSessionComposerParams) {
     appendNewThreadAttachment,
     onNewThreadComposerError,
     annotations,
+    threadMentionTargets,
   } = params;
 
   // Attachments optimistically hidden while their submit is in flight. Scoped to the
@@ -131,11 +138,15 @@ export function useSessionComposer(params: UseSessionComposerParams) {
     }
 
     const previousDraft = composerDraft;
+    const isCommand = composerDraft.trimStart().startsWith("/");
     // A slash command keeps its annotations for the next message rather than breaking the command.
-    const sentAnnotations = composerDraft.trimStart().startsWith("/") ? null : annotations.take();
-    const text = sentAnnotations?.taken.length
+    const sentAnnotations = isCommand ? null : annotations.take();
+    const annotatedText = sentAnnotations?.taken.length
       ? formatAnnotatedPrompt(sentAnnotations.taken, previousDraft)
       : previousDraft;
+    const text = isCommand
+      ? annotatedText
+      : withThreadReferences(annotatedText, threadMentionTargets);
     setComposerDraft("");
     const submittedIds = new Set(composerAttachments.map((attachment) => attachment.id));
     if (submittedIds.size > 0) {
@@ -151,9 +162,9 @@ export function useSessionComposer(params: UseSessionComposerParams) {
         ),
       );
       // A failed send hands the text back as the draft; give back the annotations and the
-      // typed text rather than their formatted blocks.
-      const returnedToComposer = sentAnnotations?.taken.length && nextState.composerDraft === text;
-      if (returnedToComposer) sentAnnotations.undo();
+      // typed text rather than their formatted blocks and thread references.
+      const returnedToComposer = text !== previousDraft && nextState.composerDraft === text;
+      if (returnedToComposer) sentAnnotations?.undo();
       // Only apply the resolved draft if the user hasn't typed into the composer during the
       // in-flight submit; otherwise their new input would be clobbered.
       if (composerDraftRef.current === "") {
