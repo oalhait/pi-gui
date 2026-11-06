@@ -411,6 +411,22 @@ export function nonCompletedBindingForSession(
   );
 }
 
+/**
+ * The live schedule posting into a thread, the only kind pinned above its
+ * composer. Paused and completed ones are listed in the thread's "…" menu.
+ */
+export function activeBindingForSession(
+  tasks: readonly ScheduledTaskRecord[],
+  sessionId: string,
+): ScheduledTaskRecord | undefined {
+  return tasks.find(
+    (task) =>
+      task.status === "active" &&
+      task.target.kind === "existing-thread" &&
+      task.target.sessionId === sessionId,
+  );
+}
+
 export function filterScheduledTasks(
   tasks: readonly ScheduledTaskRecord[],
   filter: ScheduledTaskFilter,

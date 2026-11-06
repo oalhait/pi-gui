@@ -7,7 +7,7 @@ import {
   type CreateScheduledTaskInput,
 } from "../../contracts/desktop-state";
 import {
-  nonCompletedBindingForSession,
+  activeBindingForSession,
   scheduledOriginsByMessageId,
 } from "../../contracts/scheduled-tasks";
 import { updateSnapshot, useDesktopAppState } from "./desktop-app-state";
@@ -274,7 +274,7 @@ export default function App() {
     );
   }, [pins.timeline, selectedSession, selectedWorkspace, snapshot]);
   const scheduledBinding = selectedSession
-    ? nonCompletedBindingForSession(snapshot?.scheduledTasks ?? [], selectedSession.id)
+    ? activeBindingForSession(snapshot?.scheduledTasks ?? [], selectedSession.id)
     : undefined;
   const transcriptHydration = desktop.view.kind === "ready" ? desktop.view.transcript : undefined;
   const transcriptFailed = transcriptHydration?.kind === "failed" ? transcriptHydration : null;

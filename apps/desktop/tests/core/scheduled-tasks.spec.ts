@@ -91,7 +91,7 @@ test("create with pi prefills the interview draft and does not send", async () =
   }
 });
 
-test("firing a due existing-thread task labels the user bubble and shows a chip", async () => {
+test("firing a due existing-thread task labels the user bubble, pins only while active", async () => {
   test.setTimeout(60_000);
   const userDataDir = await makeUserDataDir();
   const workspacePath = await makeWorkspace("scheduled-fire");
@@ -139,11 +139,17 @@ test("firing a due existing-thread task labels the user bubble and shows a chip"
     await expect(window.getByTestId("sent-by-scheduled-task")).toBeVisible({ timeout: 15_000 });
     await expect(window.getByTestId("transcript")).toContainText("Say ping from scheduled task");
     await expect(window.getByTestId("composer")).toHaveValue(composerDraft);
-    await expect(window.getByTestId("scheduled-task-chip")).toBeVisible();
     const after = await getDesktopState(window);
     expect(after.selectedSessionId).toBe(sessionId);
     expect(after.composerDraft).toBe(composerDraft);
     expect(after.scheduledTasks[0]?.runs[0]?.sessionId).toBe(sessionId);
+
+    // Without a provider the run fails and the task pauses itself. A paused
+    // automation is not pinned above the composer.
+    await expect
+      .poll(async () => (await getDesktopState(window)).scheduledTasks[0]?.status)
+      .toBe("paused");
+    await expect(window.getByTestId("scheduled-task-chip")).toHaveCount(0);
   } finally {
     await harness.close();
   }
