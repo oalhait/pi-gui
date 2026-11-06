@@ -55,6 +55,45 @@ export interface SessionSnapshot {
   readonly usage?: SessionUsageSnapshot;
   /** Absent until the session has an assistant reply. */
   readonly lastRunOutcome?: SessionRunOutcome;
+  /** Present while a running run waits out a lost provider connection. */
+  readonly connectionRetry?: SessionConnectionRetry;
+  /** Present while a running run has asked the model and no output has arrived yet. */
+  readonly modelWait?: SessionModelWait;
+}
+
+/**
+ * The running turn's model request has produced no output yet: it is being sent, the
+ * provider has not started answering, or Pi is backing off before retrying a failed request.
+ * Cleared by the first streamed output (text, reasoning or a tool call) and when the run ends.
+ */
+export interface SessionModelWait {
+  /** When the current request (or the retry after a failed one) started. */
+  readonly since: Timestamp;
+  /** Pi's automatic retry after a transient failure, such as an overloaded provider. */
+  readonly retry?: SessionModelRetry;
+}
+
+export interface SessionModelRetry {
+  /** The retry this is, starting at 1. */
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  /** When the backoff ends and the retry is sent; absent once it has been sent. */
+  readonly retryAt?: Timestamp;
+  /** The provider error that failed the previous request. */
+  readonly error: string;
+}
+
+/**
+ * A run whose provider connection failed after pi's own retries, kept open to be resumed.
+ * Cleared when a reply arrives or the run settles.
+ */
+export interface SessionConnectionRetry {
+  /** Resumes started so far. */
+  readonly attempt: number;
+  /** When the next resume starts; absent while one is in flight. */
+  readonly retryAt?: Timestamp;
+  /** The provider error that ended the last attempt. */
+  readonly error: string;
 }
 
 export interface SessionImageAttachment {
@@ -203,6 +242,31 @@ export interface SessionUpdatedEvent extends SessionEventBase {
 export interface AssistantDeltaEvent extends SessionEventBase {
   readonly type: "assistantDelta";
   readonly text: string;
+}
+
+/**
+ * One reasoning (thinking) block of the streaming assistant message, as pi streams it.
+ * `contentIndex` is the block's index in the message content. Redacted or encrypted
+ * reasoning can start complete, with no readable text and no deltas.
+ */
+export interface AssistantThinkingStartedEvent extends SessionEventBase {
+  readonly type: "assistantThinkingStarted";
+  readonly contentIndex: number;
+  readonly redacted?: boolean;
+}
+
+export interface AssistantThinkingDeltaEvent extends SessionEventBase {
+  readonly type: "assistantThinkingDelta";
+  readonly contentIndex: number;
+  readonly text: string;
+}
+
+/** The block ended; `text` is pi's authoritative content and replaces the streamed deltas. */
+export interface AssistantThinkingEndedEvent extends SessionEventBase {
+  readonly type: "assistantThinkingEnded";
+  readonly contentIndex: number;
+  readonly text: string;
+  readonly redacted?: boolean;
 }
 
 /** Finalizes one assistant message while the containing run may continue. */
@@ -388,6 +452,9 @@ export type SessionDriverEvent =
   | SessionOpenedEvent
   | SessionUpdatedEvent
   | AssistantDeltaEvent
+  | AssistantThinkingStartedEvent
+  | AssistantThinkingDeltaEvent
+  | AssistantThinkingEndedEvent
   | AssistantMessageEndedEvent
   | AssistantMessagePersistedEvent
   | UserMessagePersistedEvent

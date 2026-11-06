@@ -54,7 +54,7 @@ function fixture() {
     buildCreateSessionOptions: forbiddenAsync,
     getQueuedComposerMessages: () => [],
     seedSession: forbidden,
-    transcriptFor: () => empty,
+    transcriptFor: (ref) => transcripts.get(sessionKey(ref)) ?? empty,
     transcriptForKey: (key) => transcripts.get(key) ?? empty,
     replaceTranscript: forbidden,
     isTranscriptLoaded: () => true,
@@ -147,4 +147,16 @@ test("new child identities and rewound histories invalidate evidence without ret
   ).toBe("replacement-session");
   f.transcripts.set(key, []);
   expect(f.owner.projectOrchestrationChildren()[0]?.evidence).toEqual([]);
+});
+
+test("a child's reasoning stays out of its projected transcript", () => {
+  const f = fixture();
+  f.transcripts.set(sessionKey({ workspaceId: "ws", sessionId: "a" }), [
+    { kind: "message", id: "u", role: "user", text: "Do it", createdAt: timestamp },
+    { kind: "thinking", id: "t", text: "Private reasoning", createdAt: timestamp },
+    { kind: "message", id: "r", role: "assistant", text: "Done", createdAt: timestamp },
+  ]);
+  const projected = f.owner.projectOrchestrationChildren().find((item) => item.id === "a");
+  expect(projected?.transcript.map((message) => message.text)).toEqual(["Do it", "Done"]);
+  expect(projected?.latestTranscript).not.toContain("Private reasoning");
 });

@@ -1,7 +1,9 @@
 import { isCardEntryItem, sessionKey } from "@pi-gui/session-driver";
 import type { SessionTranscriptItem, SessionTranscriptPin } from "@pi-gui/session-driver";
 import type { SessionDriverEvent, SessionQueuedMessage, SessionRef } from "@pi-gui/session-driver";
+import { randomUUID } from "node:crypto";
 import type { TranscriptMessage } from "../../contracts/desktop-state";
+import type { TimelineThinking } from "../../contracts/timeline-types";
 import {
   extensionToolRowLabel,
   toolInputSummary,
@@ -103,6 +105,40 @@ export function trackUnpersistedUserMessage(
     unpersistedUserMessagesBySession.set(key, [...pending, messageId]);
 }
 
+type UserRow = Extract<SessionTranscriptItem, { kind: "message" }>;
+
+function userRows(transcript: readonly (TranscriptMessage | SessionTranscriptItem)[]): UserRow[] {
+  return transcript.filter(
+    (item): item is UserRow => item.kind === "message" && item.role === "user",
+  );
+}
+
+/**
+ * The session entry ID of the user row someone asked to edit, given by its row ID or entry ID.
+ * A row sent in this app run gets its entry ID when Pi reports it (userMessagePersisted). One
+ * that never got it is matched against Pi's current branch: the user entry at the same place
+ * counting from the newest, if its text agrees, or else the only entry with that text.
+ * Undefined when the row is unknown or nothing on the branch matches it.
+ */
+export function resolveUserEntryId(
+  transcript: readonly TranscriptMessage[],
+  branch: readonly SessionTranscriptItem[],
+  messageId: string,
+): string | undefined {
+  const rows = userRows(transcript);
+  const index = rows.findIndex((row) => row.id === messageId || row.sourceMessageId === messageId);
+  const row = rows[index];
+  if (!row) return undefined;
+  if (row.sourceMessageId) return row.sourceMessageId;
+  const entries = userRows(branch);
+  const text = row.text.trim();
+  const entryId = (entry: UserRow) => entry.sourceMessageId ?? entry.id;
+  const samePlace = entries[entries.length - (rows.length - index)];
+  if (samePlace && samePlace.text.trim() === text) return entryId(samePlace);
+  const sameText = entries.filter((entry) => entry.text.trim() === text);
+  return sameText.length === 1 ? entryId(sameText[0]!) : undefined;
+}
+
 export function appendQueuedUserMessage(
   transcriptCache: Map<string, readonly TranscriptMessage[]>,
   sessionRef: SessionRef,
@@ -188,7 +224,40 @@ export function applyTimelineEvent(
   const currentMetrics = state.runMetricsBySession.get(key);
 
   switch (event.type) {
+    case "assistantThinkingStarted": {
+      // Reply text after this block starts a new row below it, as a reload orders them.
+      clearActiveAssistantMessage(state.activeAssistantMessageBySession, event.sessionRef);
+      transcript.push({
+        kind: "thinking",
+        id: randomUUID(),
+        createdAt: event.timestamp,
+        text: "",
+        ...(event.redacted ? { redacted: true } : {}),
+        streaming: true,
+        streamingContentIndex: event.contentIndex,
+      });
+      break;
+    }
+    case "assistantThinkingDelta": {
+      const index = streamingThinkingIndex(transcript, event.contentIndex);
+      const current = transcript[index];
+      if (current?.kind !== "thinking" || !event.text) return;
+      transcript[index] = { ...current, text: `${current.text}${event.text}` };
+      break;
+    }
+    case "assistantThinkingEnded": {
+      const index = streamingThinkingIndex(transcript, event.contentIndex);
+      const current = transcript[index];
+      if (current?.kind !== "thinking") return;
+      // pi's final content is authoritative over the streamed deltas.
+      transcript[index] = endThinking(current, event.timestamp, {
+        text: event.text,
+        redacted: event.redacted === true || current.redacted === true,
+      });
+      break;
+    }
     case "assistantMessageEnded": {
+      endStreamingThinking(transcript, event.timestamp);
       const activeId = state.activeAssistantMessageBySession.get(key);
       if (activeId) state.pendingAssistantMessageBySession.set(key, activeId);
       else state.pendingAssistantMessageBySession.delete(key);
@@ -318,6 +387,7 @@ export function applyTimelineEvent(
       );
       break;
     case "runCompleted": {
+      endStreamingThinking(transcript, event.timestamp);
       const metrics = currentMetrics;
       clearRunState(key, event.sessionRef, state);
       if (metrics) {
@@ -338,6 +408,7 @@ export function applyTimelineEvent(
       break;
     }
     case "runFailed": {
+      endStreamingThinking(transcript, event.timestamp);
       const metrics = currentMetrics;
       const latestToolError = metrics
         ? latestErrorToolDetail(transcript, metrics.startedAt)
@@ -355,6 +426,7 @@ export function applyTimelineEvent(
       break;
     }
     case "sessionClosed":
+      endStreamingThinking(transcript, event.timestamp);
       clearRunState(key, event.sessionRef, state);
       transcript.push(makeActivityItem("Stopped", { metadata: relativeDetail(event.timestamp) }));
       break;
@@ -409,6 +481,41 @@ export function applyTimelineEvent(
   // transcript by identity, and frequent events (title updates, running ticks) change nothing.
   if (previous ? sameItems(previous, transcript) : transcript.length === 0) return;
   transcriptCache.set(key, transcript);
+}
+
+/** The newest still-streaming thinking row for a content block of the current message. */
+function streamingThinkingIndex(transcript: readonly TranscriptMessage[], contentIndex: number) {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const item = transcript[index];
+    if (item?.kind === "thinking" && item.streaming) {
+      if (item.streamingContentIndex === contentIndex) return index;
+    }
+  }
+  return -1;
+}
+
+function endThinking(
+  item: TimelineThinking,
+  endedAt: string,
+  final?: { readonly text: string; readonly redacted: boolean },
+): TimelineThinking {
+  const { streaming: _streaming, streamingContentIndex: _index, ...rest } = item;
+  const durationMs = Date.parse(endedAt) - Date.parse(item.createdAt);
+  const redacted = final?.redacted ?? item.redacted === true;
+  return {
+    ...rest,
+    text: redacted ? "" : (final?.text ?? item.text).trim(),
+    ...(redacted ? { redacted: true } : {}),
+    ...(Number.isFinite(durationMs) ? { durationMs: Math.max(0, durationMs) } : {}),
+  };
+}
+
+/** A message, run or session that ends closes any block pi never ended (an abort or error). */
+function endStreamingThinking(transcript: TranscriptMessage[], endedAt: string): void {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const item = transcript[index];
+    if (item?.kind === "thinking" && item.streaming) transcript[index] = endThinking(item, endedAt);
+  }
 }
 
 function sameItems(a: readonly TranscriptMessage[], b: readonly TranscriptMessage[]): boolean {

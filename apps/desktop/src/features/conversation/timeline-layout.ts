@@ -32,6 +32,9 @@ export function estimateRowHeight(item: DisplayTimelineItem, width: number): num
     }
     case "tool":
       return 52;
+    // Collapsed to one line once done; while streaming, a capped window of its newest lines.
+    case "thinking":
+      return item.streaming ? 28 + Math.min(textLines(item.text, width), 6) * 20 : 28;
     case "summary":
       return item.presentation === "divider" ? 44 : 38;
     case "activity":
@@ -69,6 +72,14 @@ export function sameRowContent(a: DisplayTimelineItem, b: DisplayTimelineItem): 
         a.detail === b.detail &&
         a.label === b.label &&
         a.metadata === b.metadata
+      );
+    case "thinking":
+      return (
+        b.kind === a.kind &&
+        a.text === b.text &&
+        a.streaming === b.streaming &&
+        a.durationMs === b.durationMs &&
+        a.redacted === b.redacted
       );
     case "summary":
       return b.kind === a.kind && a.label === b.label && a.presentation === b.presentation;

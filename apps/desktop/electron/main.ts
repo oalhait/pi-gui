@@ -20,7 +20,7 @@ import {
   type MenuItemConstructorOptions,
   type MessageBoxOptions,
 } from "electron";
-import { isValidHttpBaseUrl } from "@pi-gui/pi-sdk-driver";
+import { isValidHttpBaseUrl, type ConnectionResumePolicy } from "@pi-gui/pi-sdk-driver";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import type {
@@ -722,6 +722,14 @@ function canPublishToWindow(window: BrowserWindow): boolean {
   );
 }
 
+/** Core tests shorten the resume waits; `PI_APP_TEST_CONNECTION_RESUME_DELAYS_MS="200,200"`. */
+function testConnectionResumePolicy(): { policy?: ConnectionResumePolicy } {
+  const raw = appTestMode ? process.env.PI_APP_TEST_CONNECTION_RESUME_DELAYS_MS : undefined;
+  const delaysMs = raw?.split(",").map(Number) ?? [];
+  if (delaysMs.length === 0 || delaysMs.some((ms) => !Number.isFinite(ms) || ms < 0)) return {};
+  return { policy: { delaysMs, budgetMs: 60_000, onlinePollMs: 100 } };
+}
+
 function resolveAppTestMode(value: string | undefined): "foreground" | "background" | undefined {
   return value === "foreground" || value === "background" ? value : undefined;
 }
@@ -1062,6 +1070,12 @@ app
       // The store bounds each capture from when it starts; this only stops a stuck boundary,
       // including one waiting behind another run's capture in the same checkout.
       turnCaptureTimeoutMs: TURN_CAPTURE_BACKSTOP_MS,
+      // A run whose provider connection drops waits and resumes; the network's return ends
+      // the wait early.
+      connectionResume: {
+        isOnline: () => net.isOnline(),
+        ...testConnectionResumePolicy(),
+      },
       desktopExtensions: {
         onChanged: (runtime) => extensionViews.replaceRuntime(runtime),
         onInvalidated: ({ target, generation }) =>

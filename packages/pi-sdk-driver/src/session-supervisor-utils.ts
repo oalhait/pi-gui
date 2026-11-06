@@ -13,6 +13,8 @@ import type {
   SessionAttachment,
   SessionConfig,
   SessionErrorInfo,
+  SessionConnectionRetry,
+  SessionModelWait,
   SessionRef,
   SessionSnapshot,
   SessionStatus,
@@ -21,6 +23,7 @@ import type {
   SessionTranscriptCustomMessage,
   SessionTranscriptItem,
   SessionTranscriptPin,
+  SessionTranscriptThinking,
   SessionRunOutcome,
   SessionUsageSnapshot,
   WorkspaceRef,
@@ -30,7 +33,13 @@ import {
   EXTENSION_PIN_CUSTOM_TYPE,
   parseExtensionAction,
 } from "@pi-gui/session-driver";
-import type { SessionQueuedMessage } from "@pi-gui/session-driver/types";
+import { thinkingTimingsFromEntries } from "./thinking-timing.js";
+import type {
+  AssistantThinkingDeltaEvent,
+  AssistantThinkingEndedEvent,
+  AssistantThinkingStartedEvent,
+  SessionQueuedMessage,
+} from "@pi-gui/session-driver/types";
 
 const FILE_ATTACHMENT_BLOCK_START = "<pi-gui-file-attachments>";
 const FILE_ATTACHMENT_BLOCK_END = "</pi-gui-file-attachments>";
@@ -47,6 +56,8 @@ export interface SnapshotSource {
   readonly runningRunId: string | undefined;
   readonly queuedMessages: readonly SessionQueuedMessage[];
   readonly usage?: SessionUsageSnapshot | undefined;
+  readonly connectionRetry?: SessionConnectionRetry | undefined;
+  readonly modelWait?: SessionModelWait | undefined;
   readonly session?:
     | {
         readonly messages: readonly unknown[];
@@ -134,6 +145,17 @@ export function buildSnapshot(source: SnapshotSource): SessionSnapshot {
     ...(source.runningRunId !== undefined ? { runningRunId: source.runningRunId } : {}),
     ...(source.usage ? { usage: source.usage } : {}),
     ...(outcome ? { lastRunOutcome: outcome } : {}),
+    ...(source.connectionRetry && source.status === "running"
+      ? { connectionRetry: { ...source.connectionRetry } }
+      : {}),
+    ...(source.modelWait && source.status === "running"
+      ? {
+          modelWait: {
+            ...source.modelWait,
+            ...(source.modelWait.retry ? { retry: { ...source.modelWait.retry } } : {}),
+          },
+        }
+      : {}),
     ...(source.queuedMessages.length > 0
       ? {
           queuedMessages: source.queuedMessages.map((message) => ({
@@ -356,6 +378,7 @@ export function transcriptFromMessages(
   return transcriptFromSources(
     messages.map((message) => ({ kind: "message", message })),
     fallbackTimestamp,
+    new Map(),
   );
 }
 
@@ -367,15 +390,21 @@ export function transcriptFromSession(
   sessionManager: Pick<SessionManager, "buildContextEntries" | "getBranch">,
   fallbackTimestamp = nowIso(),
 ): SessionTranscriptItem[] {
+  const branch = sessionManager.getBranch();
   return [
-    ...transcriptFromSources(displaySourcesFromSession(sessionManager), fallbackTimestamp),
-    ...pinsFromBranch(sessionManager.getBranch()),
+    ...transcriptFromSources(
+      displaySourcesFromSession(sessionManager),
+      fallbackTimestamp,
+      thinkingTimingsFromEntries(branch),
+    ),
+    ...pinsFromBranch(branch),
   ];
 }
 
 function transcriptFromSources(
   sources: readonly DisplaySource[],
   fallbackTimestamp: string,
+  thinkingTimings: ReadonlyMap<string, ReadonlyMap<number, number>>,
 ): SessionTranscriptItem[] {
   const transcript: SessionTranscriptItem[] = [];
   const toolIndexByCallId = new Map<string, number>();
@@ -426,6 +455,11 @@ function transcriptFromSources(
       continue;
     }
 
+    if (role === "assistant") {
+      const timings = typeof message.id === "string" ? thinkingTimings.get(message.id) : undefined;
+      transcript.push(...thinkingItems(message, createdAt, timings));
+    }
+
     const text = messageText(message);
     const attachments = messageAttachments(message);
     if (text || attachments.length > 0) {
@@ -446,6 +480,85 @@ function transcriptFromSources(
   }
 
   return transcript;
+}
+
+/** The thinking part of pi's assistant stream events; other parts return undefined. */
+type ThinkingStreamEvent =
+  | { readonly type: "thinking_start"; readonly contentIndex: number }
+  | { readonly type: "thinking_delta"; readonly contentIndex: number; readonly delta: string }
+  | { readonly type: "thinking_end"; readonly contentIndex: number; readonly content: string };
+
+/**
+ * Passes pi's thinking stream through as driver events. `content` is the partial message's
+ * content, which says whether the block is redacted; redacted text is a provider placeholder
+ * (or an opaque payload), so it is not forwarded.
+ */
+export function thinkingDriverEvent(
+  event: { readonly type: string },
+  content: readonly unknown[],
+  sessionRef: SessionRef,
+  timestamp: string,
+):
+  | AssistantThinkingStartedEvent
+  | AssistantThinkingDeltaEvent
+  | AssistantThinkingEndedEvent
+  | undefined {
+  if (
+    event.type !== "thinking_start" &&
+    event.type !== "thinking_delta" &&
+    event.type !== "thinking_end"
+  ) {
+    return undefined;
+  }
+  const thinking = event as ThinkingStreamEvent;
+  const block = content[thinking.contentIndex];
+  const redacted = isRecord(block) && block.redacted === true;
+  const base = { sessionRef, timestamp, contentIndex: thinking.contentIndex };
+  switch (thinking.type) {
+    case "thinking_start":
+      return { ...base, type: "assistantThinkingStarted", ...(redacted ? { redacted } : {}) };
+    case "thinking_delta":
+      if (redacted) return undefined;
+      return { ...base, type: "assistantThinkingDelta", text: thinking.delta ?? "" };
+    case "thinking_end":
+      return {
+        ...base,
+        type: "assistantThinkingEnded",
+        text: redacted ? "" : (thinking.content ?? ""),
+        ...(redacted ? { redacted } : {}),
+      };
+  }
+}
+
+/**
+ * The thinking blocks of a saved assistant message, in content order. `durationsMs` is what
+ * pi-gui measured while the message streamed, by content index; without it (a session from
+ * terminal pi, or an aborted message) the block has no duration.
+ */
+export function thinkingItems(
+  message: Record<string, unknown>,
+  createdAt: string,
+  durationsMs?: ReadonlyMap<number, number>,
+): SessionTranscriptThinking[] {
+  const content = Array.isArray(message.content) ? (message.content as unknown[]) : [];
+  const messageId = typeof message.id === "string" ? message.id : undefined;
+  return content.flatMap((part, contentIndex): SessionTranscriptThinking[] => {
+    if (!isRecord(part) || part.type !== "thinking") return [];
+    const redacted = part.redacted === true;
+    const durationMs = durationsMs?.get(contentIndex);
+    return [
+      {
+        kind: "thinking",
+        id: `${messageId ?? `assistant-${createdAt}`}:thinking:${contentIndex}`,
+        ...(messageId ? { sourceMessageId: messageId } : {}),
+        createdAt,
+        // Redacted text is a provider placeholder or opaque payload, not reasoning.
+        text: redacted || typeof part.thinking !== "string" ? "" : part.thinking.trim(),
+        ...(redacted ? { redacted: true } : {}),
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      },
+    ];
+  });
 }
 
 /**

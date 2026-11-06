@@ -44,6 +44,26 @@ export interface SessionTranscriptToolCall {
 }
 
 /**
+ * One reasoning block of an assistant message. It sits before that message's reply text and
+ * tool calls, in content order. `text` is empty when the provider sent the reasoning
+ * redacted or encrypted (`redacted`), or only a signature.
+ */
+export interface SessionTranscriptThinking {
+  readonly kind: "thinking";
+  readonly id: string;
+  readonly createdAt: string;
+  readonly text: string;
+  readonly redacted?: boolean;
+  /**
+   * How long the block took, as pi-gui measured it while it streamed. Absent for a block
+   * pi-gui never timed, such as one from a session run in terminal pi.
+   */
+  readonly durationMs?: number;
+  /** Persisted assistant entry the block belongs to, when known. */
+  readonly sourceMessageId?: string;
+}
+
+/**
  * An extension's `pi.sendMessage({ customType, content, display: true })`, drawn the way
  * terminal pi draws it: the customType as a label over the markdown text.
  */
@@ -119,6 +139,7 @@ export interface SessionTranscriptPin {
 export type SessionTranscriptItem =
   | SessionTranscriptMessage
   | SessionTranscriptToolCall
+  | SessionTranscriptThinking
   | SessionTranscriptCustomMessage
   | SessionTranscriptCard
   | SessionTranscriptPin;

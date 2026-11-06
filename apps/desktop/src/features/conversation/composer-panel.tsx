@@ -41,6 +41,7 @@ interface ComposerPanelProps {
   readonly preparingTaskDraft?: boolean;
   readonly selectedSession: SessionRecord;
   readonly lastError?: string;
+  readonly onDismissError?: (() => void) | undefined;
   readonly runtime?: RuntimeSnapshot;
   readonly usage?: SessionUsageSnapshot;
   /** Flag values this thread's pi session started with. */
@@ -101,6 +102,7 @@ export function ComposerPanel({
   preparingTaskDraft = false,
   selectedSession,
   lastError,
+  onDismissError,
   runtime,
   usage,
   extensionFlags,
@@ -163,6 +165,7 @@ export function ComposerPanel({
         <ExtensionNotices notices={extensionNotices} />
         <ComposerSurface
           lastError={lastError}
+          onDismissError={onDismissError}
           activeSlashCommand={activeSlashCommand}
           activeSlashCommandMeta={activeSlashCommandMeta}
           topNotice={

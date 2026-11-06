@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  SessionConnectionRetry,
+  SessionModelWait,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
 } from "@pi-gui/session-driver";
 import type {
   DisplayTimelineItem,
   TimelineActivity,
+  TimelineLargeContext,
   TimelineToolCall,
   TimelineSummary,
   TimelineTurnMarker,
@@ -41,6 +44,9 @@ import {
   TerminalIcon,
 } from "../../ui/icons";
 import { extensionToLanguage } from "../../ui/syntax-highlight";
+import { formatElapsedDuration } from "./elapsed-duration";
+import { modelWaitText } from "./model-wait-label";
+import { TimelineThinkingItem } from "./timeline-thinking";
 
 export function TimelineItem({
   item,
@@ -57,10 +63,16 @@ export function TimelineItem({
   onExtensionAction,
   annotationMarkers,
   onOpenAnnotation,
+  thinkingExpanded = false,
+  onToggleThinking,
+  onStopRun,
 }: {
   readonly item: DisplayTimelineItem;
   readonly expandedToolCallIds?: ReadonlySet<string>;
   readonly onToggleToolCall?: (callId: string) => void;
+  /** Whether a thinking row shows its text; the timeline owns this per row. */
+  readonly thinkingExpanded?: boolean;
+  readonly onToggleThinking?: (id: string, expanded: boolean) => void;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly sourceMessageIndex?: number;
   readonly onEditFromMessage?: (message: SessionTranscriptMessage) => void;
@@ -72,12 +84,14 @@ export function TimelineItem({
   readonly onExtensionAction?: RunExtensionAction;
   readonly annotationMarkers?: readonly AnnotationMarker[];
   readonly onOpenAnnotation?: OpenAnnotation;
+  /** Stops the run; Cancel on a lost-connection line uses it. */
+  readonly onStopRun?: (() => void) | undefined;
 }) {
   switch (item.kind) {
     case "turn-marker":
       return <TimelineTurnMarkerItem item={item} />;
     case "working":
-      return <TimelineWorkingItem item={item} />;
+      return <TimelineWorkingItem item={item} onStopRun={onStopRun} />;
     case "turn-changes":
       return <TurnChangesCard turn={item.turn} onOpen={onOpenTurnChange} />;
     case "message":
@@ -107,6 +121,10 @@ export function TimelineItem({
       );
     case "summary":
       return <TimelineSummaryItem item={item} />;
+    case "thinking":
+      return (
+        <TimelineThinkingItem item={item} expanded={thinkingExpanded} onToggle={onToggleThinking} />
+      );
     case "custom":
       return <TimelineCustomMessage item={item} />;
     case "card":
@@ -546,13 +564,25 @@ function statusLabel(status: "running" | "success" | "error") {
 function TimelineTurnMarkerItem({ item }: { readonly item: TimelineTurnMarker }) {
   return (
     <div className="timeline-turn-marker" data-testid="timeline-turn-marker">
-      <span className="timeline-turn-marker__label">{`Worked for ${formatWorkedDuration(item.durationMs)}`}</span>
+      <span className="timeline-turn-marker__label">{`Worked for ${formatElapsedDuration(item.durationMs)}`}</span>
     </div>
   );
 }
 
-function TimelineWorkingItem({ item }: { readonly item: TimelineWorkingIndicator }) {
+function TimelineWorkingItem({
+  item,
+  onStopRun,
+}: {
+  readonly item: TimelineWorkingIndicator;
+  readonly onStopRun?: (() => void) | undefined;
+}) {
   const label = useRunningLabel(item.startedAt);
+  if (item.connectionRetry) {
+    return <ConnectionRetryLine retry={item.connectionRetry} onCancel={onStopRun} />;
+  }
+  if (item.modelWait) {
+    return <ModelWaitLine wait={item.modelWait} largeContext={item.largeContext} />;
+  }
   return (
     <div className="timeline-working" data-testid="timeline-working">
       <span className="timeline-working__label">{label}</span>
@@ -560,19 +590,82 @@ function TimelineWorkingItem({ item }: { readonly item: TimelineWorkingIndicator
   );
 }
 
-function formatWorkedDuration(durationMs: number): string {
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) {
-    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
+/**
+ * "Waiting for the model · 12s" until the first output, with a note when the context is large
+ * or the wait passes a minute; "Model request failed (provider overloaded). Retrying in 4s"
+ * while Pi backs off before a retry.
+ */
+function ModelWaitLine({
+  wait,
+  largeContext,
+}: {
+  readonly wait: SessionModelWait;
+  readonly largeContext?: TimelineLargeContext | undefined;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [wait]);
+  const text = modelWaitText(wait, largeContext, now);
+  return (
+    <div className="timeline-working timeline-working--model-wait" data-testid="timeline-working">
+      <span
+        className="timeline-working__label"
+        data-testid="timeline-model-wait"
+        title={wait.retry?.error}
+      >
+        {text.label}
+      </span>
+      {text.notes.map((note) => (
+        <span key={note} className="timeline-working__note" data-testid="timeline-model-wait-note">
+          {note}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** "Connection lost. Retrying in 12s", then "Reconnecting…" while the resumed attempt runs. */
+function ConnectionRetryLine({
+  retry,
+  onCancel,
+}: {
+  readonly retry: SessionConnectionRetry;
+  readonly onCancel?: (() => void) | undefined;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!retry.retryAt) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [retry.retryAt]);
+  const seconds = retry.retryAt ? Math.ceil((Date.parse(retry.retryAt) - now) / 1000) : 0;
+  const status = !retry.retryAt
+    ? "Reconnecting…"
+    : seconds > 0
+      ? `Retrying in ${seconds}s`
+      : "Retrying…";
+  return (
+    <div
+      className="timeline-working timeline-working--retry"
+      data-testid="timeline-connection-retry"
+      title={retry.error}
+    >
+      <span className="timeline-working__label">{`Connection lost. ${status}`}</span>
+      {onCancel ? (
+        <button
+          type="button"
+          className="timeline-working__cancel"
+          data-testid="connection-retry-cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function TimelineSummaryItem({ item }: { readonly item: TimelineSummary }) {

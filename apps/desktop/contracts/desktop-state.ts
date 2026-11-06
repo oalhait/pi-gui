@@ -2,6 +2,8 @@ import type {
   ExtensionFlagValues,
   HostUiRequest,
   SessionConfig,
+  SessionConnectionRetry,
+  SessionModelWait,
   SessionUsageSnapshot,
 } from "@pi-gui/session-driver";
 import type {
@@ -111,6 +113,10 @@ export interface SessionRecord {
   readonly preview: string;
   readonly status: SessionStatus;
   readonly runningSince?: string;
+  /** The running run lost its provider connection and waits to resume. */
+  readonly connectionRetry?: SessionConnectionRetry | undefined;
+  /** The running turn waits for the model's first output, or for Pi to retry a request. */
+  readonly modelWait?: SessionModelWait | undefined;
   readonly hasUnseenUpdate: boolean;
   readonly config?: SessionConfig;
 }

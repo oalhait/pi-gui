@@ -6,6 +6,7 @@ import {
   appendAssistantDelta,
   appendUserMessage,
   applyTimelineEvent,
+  resolveUserEntryId,
   trackUnpersistedUserMessage,
 } from "../../electron/conversation/app-store-timeline";
 
@@ -244,4 +245,47 @@ test("persisted user entry IDs attach to the live user rows they were sent as, i
   expect(sourceIds.get(second)).toBe("entry-second");
   expect(sourceIds.get(skill)).toBe("entry-skill");
   expect(h.state.unpersistedUserMessagesBySession.get(key)).toEqual([]);
+});
+
+test("an edit finds the entry of a row Pi never identified on the current branch", () => {
+  const live = (id: string, text: string, sourceMessageId?: string): TranscriptMessage => ({
+    kind: "message",
+    id,
+    role: "user",
+    text,
+    createdAt: timestamp,
+    ...(sourceMessageId ? { sourceMessageId } : {}),
+  });
+  const entry = (id: string, text: string) => ({
+    kind: "message" as const,
+    id,
+    sourceMessageId: id,
+    role: "user" as const,
+    text,
+    createdAt: timestamp,
+  });
+  const rows = [
+    live("entry-1", "First", "entry-1"),
+    { ...live("reply", "Answer"), role: "assistant" as const },
+    live("row-2", "Can you answer the question above"),
+    live("row-3", "Can you answer the question above"),
+  ];
+  const branch = [
+    entry("entry-1", "First"),
+    entry("entry-2", "Can you answer the question above"),
+    entry("entry-3", "Can you answer the question above"),
+  ];
+  // Identified rows need no branch, whether named by row or entry ID.
+  expect(resolveUserEntryId(rows, [], "entry-1")).toBe("entry-1");
+  // Same text twice: the place counted from the newest tells them apart.
+  expect(resolveUserEntryId(rows, branch, "row-2")).toBe("entry-2");
+  expect(resolveUserEntryId(rows, branch, "row-3")).toBe("entry-3");
+  // A row queued behind them shifts the places; its unique text still finds it.
+  const queued = [...rows, live("row-4", "Queued later")];
+  expect(resolveUserEntryId(queued, [...branch, entry("entry-4", "Queued later")], "row-4")).toBe(
+    "entry-4",
+  );
+  expect(resolveUserEntryId(rows, [], "row-2")).toBeUndefined();
+  expect(resolveUserEntryId(rows, branch, "unknown")).toBeUndefined();
+  expect(resolveUserEntryId([live("row-x", "Never written")], branch, "row-x")).toBeUndefined();
 });

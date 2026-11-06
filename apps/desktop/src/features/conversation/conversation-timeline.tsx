@@ -23,6 +23,7 @@ import { ThreadSearchBar } from "./thread-search";
 import type { RunExtensionAction } from "./extension-card";
 import { TimelineItem } from "./timeline-item";
 import { sameRowContent, type TimelineRow } from "./timeline-layout";
+import { useThinkingDisplay, type ThinkingDisplay } from "./thinking-display";
 import type { OpenTurnChange } from "./turn-changes-card";
 import type { WorkspaceFileLine } from "./workspace-file-line";
 import { SparkIcon } from "../../ui/icons";
@@ -57,6 +58,8 @@ interface ConversationTimelineProps {
   readonly workspacePath?: string;
   readonly annotations?: TranscriptAnnotations;
   readonly platform: NodeJS.Platform;
+  /** Stops the run; Cancel on a lost-connection line uses it. */
+  readonly onStopRun?: () => void;
 }
 const NO_MARKERS: readonly AnnotationMarker[] = [];
 export function ConversationTimeline({
@@ -78,6 +81,7 @@ export function ConversationTimeline({
   workspacePath,
   annotations,
   platform,
+  onStopRun,
 }: ConversationTimelineProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const annotationSelection = useAnnotationSelection({
@@ -116,6 +120,25 @@ export function ConversationTimeline({
     setExpandedToolCallIds((current) => {
       if ([...current].every((id) => available.has(id))) return current;
       return new Set([...current].filter((id) => available.has(id)));
+    });
+  }, [transcript]);
+  // A row the user opened or closed keeps that; others follow the Show thinking setting, and
+  // a block still streaming shows its newest lines.
+  const [thinkingDisplay] = useThinkingDisplay();
+  const [thinkingOverrides, setThinkingOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
+  const toggleThinking = useCallback(
+    (id: string, expanded: boolean) =>
+      setThinkingOverrides((current) => new Map(current).set(id, expanded)),
+    [],
+  );
+  useLayoutEffect(() => {
+    setThinkingOverrides((current) => {
+      if (current.size === 0) return current;
+      const available = new Set(transcript.map((item) => item.id));
+      if ([...current.keys()].every((id) => available.has(id))) return current;
+      return new Map([...current].filter(([id]) => available.has(id)));
     });
   }, [transcript]);
   const renderedMessageIndexById = useMemo(() => {
@@ -178,6 +201,8 @@ export function ConversationTimeline({
                     generation={viewport.layoutGeneration}
                     expandedToolCallIds={expandedToolCallIds}
                     onToggleToolCall={toggleToolCall}
+                    thinkingExpanded={thinkingExpanded(item, thinkingOverrides, thinkingDisplay)}
+                    onToggleThinking={toggleThinking}
                     onViewFileInDiff={onViewFileInDiff}
                     onOpenTurnChange={onOpenTurnChange}
                     sourceMessageIndex={renderedMessageIndexById.get(item.id)}
@@ -194,6 +219,7 @@ export function ConversationTimeline({
                       NO_MARKERS
                     }
                     onOpenAnnotation={annotationSelection.openAnnotation}
+                    onStopRun={onStopRun}
                     scheduledOrigin={
                       item.kind === "message" ? scheduledOrigins?.get(item.id) : undefined
                     }
@@ -280,6 +306,15 @@ function TranscriptEmptyState() {
   );
 }
 
+function thinkingExpanded(
+  item: DisplayTimelineItem,
+  overrides: ReadonlyMap<string, boolean>,
+  display: ThinkingDisplay,
+): boolean {
+  if (item.kind !== "thinking") return false;
+  return overrides.get(item.id) ?? (item.streaming === true || display === "expanded");
+}
+
 interface MeasuredTimelineItemProps {
   readonly item: DisplayTimelineItem;
   readonly className?: string;
@@ -290,6 +325,8 @@ interface MeasuredTimelineItemProps {
   readonly generation: number;
   readonly expandedToolCallIds: ReadonlySet<string>;
   readonly onToggleToolCall: (callId: string) => void;
+  readonly thinkingExpanded: boolean;
+  readonly onToggleThinking: (id: string, expanded: boolean) => void;
   readonly onViewFileInDiff?: (path: string) => void;
   readonly onOpenTurnChange?: OpenTurnChange;
   readonly sourceMessageIndex?: number;
@@ -301,6 +338,7 @@ interface MeasuredTimelineItemProps {
   readonly workspacePath?: string;
   readonly annotationMarkers: readonly AnnotationMarker[];
   readonly onOpenAnnotation: OpenAnnotation;
+  readonly onStopRun?: (() => void) | undefined;
 }
 
 function MeasuredTimelineItemBase({
@@ -312,6 +350,8 @@ function MeasuredTimelineItemBase({
   generation,
   expandedToolCallIds,
   onToggleToolCall,
+  thinkingExpanded,
+  onToggleThinking,
   onViewFileInDiff,
   onOpenTurnChange,
   sourceMessageIndex,
@@ -323,6 +363,7 @@ function MeasuredTimelineItemBase({
   workspacePath,
   annotationMarkers,
   onOpenAnnotation,
+  onStopRun,
 }: MeasuredTimelineItemProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
 
@@ -361,6 +402,8 @@ function MeasuredTimelineItemBase({
           item={item}
           expandedToolCallIds={expandedToolCallIds}
           onToggleToolCall={onToggleToolCall}
+          thinkingExpanded={thinkingExpanded}
+          onToggleThinking={onToggleThinking}
           onViewFileInDiff={onViewFileInDiff}
           onOpenTurnChange={onOpenTurnChange}
           sourceMessageIndex={sourceMessageIndex}
@@ -372,6 +415,7 @@ function MeasuredTimelineItemBase({
           workspacePath={workspacePath}
           annotationMarkers={annotationMarkers}
           onOpenAnnotation={onOpenAnnotation}
+          onStopRun={onStopRun}
         />
       </div>
     </div>
@@ -411,6 +455,9 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
       a.metadata === b.metadata
     );
   }
+  if (a.kind === "thinking" && b.kind === "thinking") {
+    return sameRowContent(a, b);
+  }
   if (a.kind === "activity" && b.kind === "activity") {
     return (
       a.label === b.label && a.detail === b.detail && a.metadata === b.metadata && a.tone === b.tone
@@ -423,8 +470,17 @@ function isSameDisplayItem(a: DisplayTimelineItem, b: DisplayTimelineItem): bool
     return a.durationMs === b.durationMs;
   }
   if (a.kind === "working" && b.kind === "working") {
-    // The line ticks its own elapsed time, so only a new run start redraws it.
-    return a.startedAt === b.startedAt;
+    // The line ticks its own elapsed time, so only a new run start, wait or retry redraws it.
+    return (
+      a.startedAt === b.startedAt &&
+      a.connectionRetry?.attempt === b.connectionRetry?.attempt &&
+      a.connectionRetry?.retryAt === b.connectionRetry?.retryAt &&
+      a.modelWait?.since === b.modelWait?.since &&
+      a.modelWait?.retry?.attempt === b.modelWait?.retry?.attempt &&
+      a.modelWait?.retry?.retryAt === b.modelWait?.retry?.retryAt &&
+      a.largeContext?.tokens === b.largeContext?.tokens &&
+      a.largeContext?.cacheExpired === b.largeContext?.cacheExpired
+    );
   }
   if (a.kind === "turn-changes" && b.kind === "turn-changes") {
     // A card's id is its checkpoint, and a captured turn's files never change.
@@ -453,6 +509,8 @@ function areMeasuredTimelineItemPropsEqual(
     prev.onHeightChange === next.onHeightChange &&
     prev.expandedToolCallIds === next.expandedToolCallIds &&
     prev.onToggleToolCall === next.onToggleToolCall &&
+    prev.thinkingExpanded === next.thinkingExpanded &&
+    prev.onToggleThinking === next.onToggleThinking &&
     prev.onViewFileInDiff === next.onViewFileInDiff &&
     prev.onOpenTurnChange === next.onOpenTurnChange &&
     prev.sourceMessageIndex === next.sourceMessageIndex &&
@@ -463,6 +521,7 @@ function areMeasuredTimelineItemPropsEqual(
     prev.workspacePath === next.workspacePath &&
     prev.annotationMarkers === next.annotationMarkers &&
     prev.onOpenAnnotation === next.onOpenAnnotation &&
+    prev.onStopRun === next.onStopRun &&
     prev.scheduledOrigin?.taskId === next.scheduledOrigin?.taskId
   );
 }

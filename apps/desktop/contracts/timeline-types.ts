@@ -1,9 +1,12 @@
 import type {
+  SessionConnectionRetry,
+  SessionModelWait,
   SessionTranscriptCard,
   SessionTranscriptCustomMessage,
   SessionTranscriptMessage,
   SessionTranscriptPin,
   SessionTranscriptRole,
+  SessionTranscriptThinking,
 } from "@pi-gui/session-driver";
 import type { TurnChangeSummary } from "./review";
 
@@ -45,8 +48,19 @@ export interface TimelineSummary {
   readonly presentation: TimelineSummaryPresentation;
 }
 
+/**
+ * A reasoning block. `streaming` is set only while a live block is still arriving; its
+ * `createdAt` is when the block started, so the row can tick its elapsed time.
+ */
+export interface TimelineThinking extends SessionTranscriptThinking {
+  readonly streaming?: boolean;
+  /** While streaming, the block's index in the assistant message content. */
+  readonly streamingContentIndex?: number;
+}
+
 export type TranscriptMessage =
   | SessionTranscriptMessage
+  | TimelineThinking
   | SessionTranscriptCustomMessage
   | SessionTranscriptCard
   | SessionTranscriptPin
@@ -87,6 +101,18 @@ export interface TimelineWorkingIndicator {
   readonly kind: "working";
   readonly id: "working-indicator";
   readonly startedAt?: string;
+  /** The run lost its provider connection: the line says so and offers Cancel. */
+  readonly connectionRetry?: SessionConnectionRetry;
+  /** The turn waits for the model's first output, or for Pi to retry a failed request. */
+  readonly modelWait?: SessionModelWait;
+  /** The request carries a large context, so the first output can take a while. */
+  readonly largeContext?: TimelineLargeContext;
+}
+
+export interface TimelineLargeContext {
+  readonly tokens: number;
+  /** The provider's prompt cache had lapsed when the request started, so all of it is reread. */
+  readonly cacheExpired: boolean;
 }
 
 export type DisplayTimelineItem =

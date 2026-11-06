@@ -1,6 +1,9 @@
 export type {
   AssistantDeltaEvent,
   AssistantMessageEndedEvent,
+  AssistantThinkingDeltaEvent,
+  AssistantThinkingEndedEvent,
+  AssistantThinkingStartedEvent,
   AssistantMessagePersistedEvent,
   UserMessagePersistedEvent,
   TranscriptItemAppendedEvent,
@@ -24,6 +27,9 @@ export type {
   SessionConfig,
   SessionDriver,
   SessionDriverEvent,
+  SessionConnectionRetry,
+  SessionModelRetry,
+  SessionModelWait,
   SessionErrorInfo,
   SessionEventListener,
   SessionId,
@@ -85,6 +91,7 @@ export type {
   SessionTranscriptMessage,
   SessionTranscriptPin,
   SessionTranscriptRole,
+  SessionTranscriptThinking,
   SessionTranscriptToolCall,
 } from "./transcript.js";
 

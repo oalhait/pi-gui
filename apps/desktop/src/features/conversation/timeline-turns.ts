@@ -1,11 +1,37 @@
 import type { TurnChangeSummary } from "../../../contracts/review";
 import type {
+  SessionConnectionRetry,
+  SessionModelWait,
+  SessionUsageSnapshot,
+} from "@pi-gui/session-driver";
+import type {
   DisplayTimelineItem,
+  TimelineLargeContext,
   TimelineTranscriptItem,
   TimelineTurnMarker,
 } from "../../../contracts/timeline-types";
 
 const MIN_WORKED_DURATION_MS = 1_000;
+
+/** A context this large takes the provider noticeably longer to read before it answers. */
+export const LARGE_CONTEXT_TOKENS = 150_000;
+
+/**
+ * Whether the request the turn waits on carries a large context, and whether the provider's
+ * prompt cache had lapsed when it started. Unknown or warm caches are not called expired.
+ */
+export function largeContextForWait(
+  modelWait: SessionModelWait | undefined,
+  usage: SessionUsageSnapshot | undefined,
+): TimelineLargeContext | undefined {
+  const tokens = usage?.context?.tokens;
+  if (!modelWait || modelWait.retry || !tokens || tokens < LARGE_CONTEXT_TOKENS) return undefined;
+  const expiresAt = usage.cache.expiresAt ? Date.parse(usage.cache.expiresAt) : Number.NaN;
+  const cacheExpired = !Number.isNaN(expiresAt) && expiresAt <= Date.parse(modelWait.since);
+  // A warm cache answers quickly, so only a lapsed or unknown cache earns the note.
+  if (!cacheExpired && !Number.isNaN(expiresAt)) return undefined;
+  return { tokens, cacheExpired };
+}
 
 function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
   return item?.kind === "message" && item.role === "user";
@@ -14,8 +40,8 @@ function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
 /**
  * Insert "Worked for Ns" turn markers, derived purely from real message/tool
  * timestamps. A turn begins at a user message and runs until the next user
- * message; the marker sits directly above the turn's final assistant reply
- * (Codex-style), or at the end of the turn when it has no assistant reply, and
+ * message; the marker sits directly above the turn's final assistant reply and
+ * the reasoning rows that lead into it (Codex-style), or at the end of the turn when it has no assistant reply, and
  * reports the elapsed time from the prompt to the last item of that turn.
  *
  * Durations are never fabricated: a marker is emitted only when the turn has
@@ -31,14 +57,24 @@ function isUserMessage(item: TimelineTranscriptItem | undefined): boolean {
  * where the newest output appears.
  */
 export function buildDisplayTimelineItems(
-  transcript: readonly TimelineTranscriptItem[],
+  fullTranscript: readonly TimelineTranscriptItem[],
   options: {
     readonly lastTurnRunning?: boolean;
     /** When the running turn started; shown as elapsed time on the "Working" line. */
     readonly runningSince?: string;
+    /** The running turn waits out a lost provider connection. */
+    readonly connectionRetry?: SessionConnectionRetry | undefined;
+    /** The running turn waits for the model's first output or Pi's retry of a request. */
+    readonly modelWait?: SessionModelWait | undefined;
+    readonly largeContext?: TimelineLargeContext | undefined;
     readonly turnChanges?: readonly TurnChangeSummary[];
+    /** The Show thinking setting is Hidden: reasoning rows are left out. */
+    readonly hideThinking?: boolean;
   } = {},
 ): readonly DisplayTimelineItem[] {
+  const transcript = options.hideThinking
+    ? fullTranscript.filter((item) => item.kind !== "thinking")
+    : fullTranscript;
   // Marker to emit immediately before the transcript item at that index.
   // Index `transcript.length` means "after the last item".
   const markersBefore = new Map<number, TimelineTurnMarker>();
@@ -71,6 +107,8 @@ export function buildDisplayTimelineItems(
       }
       if (item.kind === "message" && item.role === "assistant") {
         finalReplyIndex = index;
+        // The reply's own reasoning stays with it, below the marker.
+        while (transcript[finalReplyIndex - 1]?.kind === "thinking") finalReplyIndex -= 1;
       }
       // An extension can post into the thread long after the run settled, and a keyed card
       // carries its latest write's time; a message steered into the run is already covered
@@ -115,7 +153,14 @@ export function buildDisplayTimelineItems(
     }
   }
   if (options.lastTurnRunning) {
-    result.push({ kind: "working", id: "working-indicator", startedAt: options.runningSince });
+    result.push({
+      kind: "working",
+      id: "working-indicator",
+      startedAt: options.runningSince,
+      ...(options.connectionRetry ? { connectionRetry: options.connectionRetry } : {}),
+      ...(options.modelWait ? { modelWait: options.modelWait } : {}),
+      ...(options.modelWait && options.largeContext ? { largeContext: options.largeContext } : {}),
+    });
   }
   return result;
 }

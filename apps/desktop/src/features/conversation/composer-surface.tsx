@@ -35,6 +35,8 @@ type FileMentionOption = Extract<MentionOption, { kind: "file" }>;
 
 interface ComposerSurfaceProps {
   readonly lastError?: string;
+  /** Shown with the error when it stays until the person dismisses it. */
+  readonly onDismissError?: (() => void) | undefined;
   readonly activeSlashCommand?: ComposerSlashCommand;
   readonly activeSlashCommandMeta?: string;
   readonly topNotice?: ReactNode;
@@ -84,6 +86,7 @@ interface ComposerSurfaceProps {
 
 export function ComposerSurface({
   lastError,
+  onDismissError,
   activeSlashCommand,
   activeSlashCommandMeta,
   topNotice,
@@ -259,8 +262,21 @@ export function ComposerSurface({
         />
       ) : null}
       {lastError ? (
-        <div className="composer__error error-banner" data-testid="composer-error-banner">
-          {lastError}
+        <div
+          className={`composer__error error-banner${onDismissError ? " composer__error--dismissible" : ""}`}
+          data-testid="composer-error-banner"
+        >
+          <span className="composer__error-text">{lastError}</span>
+          {onDismissError ? (
+            <button
+              type="button"
+              className="composer__error-dismiss"
+              aria-label="Dismiss error"
+              onClick={onDismissError}
+            >
+              Dismiss
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div className="composer__editor">

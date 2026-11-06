@@ -18,7 +18,7 @@ import { useAppNavigation } from "./use-app-navigation";
 import { useDesktopCommands } from "./use-desktop-commands";
 import { useRunningLabel } from "../features/conversation/hooks/use-running-label";
 import { useTimelineViewport } from "../features/conversation/hooks/use-timeline-viewport";
-import { buildDisplayTimelineItems } from "../features/conversation/timeline-turns";
+import { useTimelineRows } from "../features/conversation/hooks/use-timeline-rows";
 import { useTurnChanges } from "../features/conversation/hooks/use-turn-changes";
 import { restoreTopmostDialogFocus } from "../ui/dialog-focus";
 import { ComposerPanel } from "../features/conversation/composer-panel";
@@ -285,14 +285,11 @@ export default function App() {
     running: selectedSessionRunning,
     workbench,
   });
-  const timelineRows = useMemo(
-    () =>
-      buildDisplayTimelineItems(pins.timeline, {
-        lastTurnRunning: selectedSessionRunning,
-        runningSince: selectedSessionRunning ? selectedSession?.runningSince : undefined,
-        turnChanges: turnChanges.turns,
-      }),
-    [pins.timeline, selectedSessionRunning, selectedSession?.runningSince, turnChanges.turns],
+  const timelineRows = useTimelineRows(
+    pins.timeline,
+    selectedSession,
+    turnChanges.turns,
+    selectedSessionKey ? snapshot?.sessionUsageBySession[selectedSessionKey] : undefined,
   );
   const viewport = useTimelineViewport({
     sessionKey: selectedSessionKey,
@@ -486,6 +483,8 @@ export default function App() {
     closeForkModal,
     openForkModal,
     editFromMessage,
+    editError,
+    dismissEditError,
     handleForkSubmit,
     canUseWorktree,
   } = useTreeForkModals({
@@ -1193,6 +1192,7 @@ export default function App() {
                     scheduledOrigins={scheduledOrigins}
                     annotations={transcriptAnnotations}
                     platform={api?.platform ?? "linux"}
+                    onStopRun={stopCurrentRun}
                   />
                 </div>
               </section>
@@ -1247,7 +1247,8 @@ export default function App() {
                 onSubmit={submitComposerDraft}
                 onStop={stopCurrentRun}
                 selectedSession={selectedSession}
-                lastError={snapshot.lastError}
+                lastError={editError ?? snapshot.lastError}
+                onDismissError={editError ? dismissEditError : undefined}
                 selectedSlashCommand={
                   slashMenu.activeSlashOptionCommand ?? slashMenu.selectedSlashCommand
                 }

@@ -615,12 +615,158 @@
   animation: working-shimmer 2s linear infinite;
 }
 
+/* A lost connection keeps the status line, with a quiet way to give up waiting. */
+.timeline-working--retry {
+  gap: 10px;
+}
+
+.timeline-working--model-wait {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.timeline-working__note {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.timeline-working__cancel {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.timeline-working__cancel:hover,
+.timeline-working__cancel:focus-visible {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+
 @keyframes working-shimmer {
   from {
     background-position: 100% 0;
   }
   to {
     background-position: 0% 0;
+  }
+}
+
+/* ---- Thinking ----------------------------------------------------------- */
+
+/* The model's reasoning sits under the answer's weight: muted, a size smaller. */
+.timeline-thinking {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.timeline-thinking__header {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-self: start;
+  min-height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted-soft);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-thinking__header:hover {
+  color: var(--muted-strong);
+}
+
+.timeline-thinking__header--static {
+  cursor: default;
+}
+
+.timeline-thinking__header--static:hover {
+  color: var(--muted-soft);
+}
+
+.timeline-thinking--streaming .timeline-thinking__label {
+  color: transparent;
+  background: linear-gradient(
+      90deg,
+      var(--muted-soft) 0%,
+      var(--muted-soft) 35%,
+      var(--text-strong) 50%,
+      var(--muted-soft) 65%,
+      var(--muted-soft) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: working-shimmer 2s linear infinite;
+}
+
+.timeline-thinking__chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--muted-soft);
+  transition: transform var(--motion-base) var(--ease-out);
+}
+
+.timeline-thinking__chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.timeline-thinking__chevron--expanded {
+  transform: rotate(90deg);
+}
+
+.timeline-thinking__body {
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.timeline-thinking__text .message__content {
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* While streaming, a fixed-height window shows the newest lines, so the row stops growing
+   once full instead of pushing the conversation on every token. */
+.timeline-thinking__body--live {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 9.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 2.5em);
+}
+
+.timeline-thinking__actions {
+  display: flex;
+  margin: 2px 0 0 -8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-thinking--streaming .timeline-thinking__label {
+    color: var(--muted-soft);
+    background: none;
+    animation: none;
+  }
+
+  .timeline-thinking__chevron {
+    transition: none;
   }
 }
 

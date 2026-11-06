@@ -79,6 +79,7 @@ import {
   applyTimelineEvent,
   appendAssistantDelta,
   clearActiveAssistantMessage,
+  resolveUserEntryId,
   timelineFromDriverTranscript,
 } from "../conversation/app-store-timeline";
 import {
@@ -188,6 +189,7 @@ export interface DesktopAppStoreOptions {
   readonly driverOptions?: Pick<
     PiSdkDriverConfig,
     | "builtinExtensions"
+    | "connectionResume"
     | "desktopExtensions"
     | "onTurnCaptureBoundary"
     | "openUrl"
@@ -1278,10 +1280,30 @@ export class DesktopAppStore {
     await this.initialize();
     const sessionRef = toSessionRef(target);
     await this.ensureSessionReady(sessionRef);
-    return this.publishTreeNavigation(
-      target,
-      await this.driver.rewindToUserMessage(sessionRef, sourceMessageId),
-    );
+    const key = sessionKey(sessionRef);
+    let entryId = sourceMessageId;
+    try {
+      const transcript = this.sessionState.transcriptCache.get(key) ?? [];
+      // A row Pi has identified needs no branch read; only an unidentified one is matched.
+      entryId =
+        resolveUserEntryId(transcript, [], sourceMessageId) ??
+        resolveUserEntryId(
+          transcript,
+          await this.driver.getTranscript(sessionRef),
+          sourceMessageId,
+        ) ??
+        sourceMessageId;
+      return this.publishTreeNavigation(
+        target,
+        await this.driver.rewindToUserMessage(sessionRef, entryId),
+      );
+    } catch (error) {
+      console.error(
+        `[app-store] editing message ${sourceMessageId} (entry ${entryId}) in ${key} failed:`,
+        error,
+      );
+      throw error;
+    }
   }
 
   private async publishTreeNavigation(
