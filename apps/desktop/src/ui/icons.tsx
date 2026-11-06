@@ -715,6 +715,20 @@ export function PlugIcon() {
   );
 }
 
+export function ServerIcon() {
+  return (
+    <Icon>
+      <path
+        d="M4.2 4.4h11.6v4.4H4.2zM4.2 11.2h11.6v4.4H4.2zM6.6 6.6h.01M6.6 13.4h.01"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+    </Icon>
+  );
+}
+
 export function MoreIcon() {
   return (
     <Icon>
