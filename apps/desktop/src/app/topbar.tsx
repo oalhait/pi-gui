@@ -42,19 +42,23 @@ export function Topbar({
     selectedWorkspace?.kind === "worktree"
       ? (selectedWorktree?.name ?? selectedWorkspace.branchName ?? selectedWorkspace.name)
       : selectedWorkspace?.branchName;
+  const topLevel = rootWorkspace?.kind === "chats";
 
   return (
     <header className="topbar" data-testid="topbar" onDoubleClick={handleDoubleClick}>
       <div className="topbar__title">
-        <span
-          className="topbar__workspace"
-          title={checkoutLabel ? `${rootWorkspace?.name ?? ""} · ${checkoutLabel}` : undefined}
-        >
-          {rootWorkspace ? rootWorkspace.name : "Open a folder to begin"}
-        </span>
+        {/* A thread outside any folder shows only its own title. */}
+        {topLevel ? null : (
+          <span
+            className="topbar__workspace"
+            title={checkoutLabel ? `${rootWorkspace?.name ?? ""} · ${checkoutLabel}` : undefined}
+          >
+            {rootWorkspace ? rootWorkspace.name : "Open a folder to begin"}
+          </span>
+        )}
         {sessionTitle ? (
           <>
-            <span className="topbar__separator">/</span>
+            {topLevel ? null : <span className="topbar__separator">/</span>}
             <h1 className="chat-header__title" title={sessionTitle}>
               {sessionTitle}
             </h1>
@@ -66,7 +70,7 @@ export function Topbar({
           </>
         ) : activeView === "new-thread" && rootWorkspace ? (
           <>
-            <span className="topbar__separator">/</span>
+            {topLevel ? null : <span className="topbar__separator">/</span>}
             <span className="topbar__session">New thread</span>
           </>
         ) : null}

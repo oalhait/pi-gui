@@ -54,7 +54,10 @@ test("starts a top-level chat with no folder open, and keeps it after restart", 
     await expect(window.getByTestId("empty-state")).toHaveCount(0);
     const row = window.locator(`.session-row[data-session-id="${state.selectedSessionId}"]`);
     await expect(row).toBeVisible();
-    await expect(row.locator(".session-row__context")).toHaveText("Chats");
+    // No folder label on the row, and no folder name in the top bar.
+    await expect(row.locator(".session-row__context")).toHaveCount(0);
+    await expect(window.locator(".topbar__workspace")).toHaveCount(0);
+    await expect(window.locator(".topbar__separator")).toHaveCount(0);
     await expect(window.getByTestId("composer")).toHaveAttribute(
       "placeholder",
       "Ask a follow-up...",
@@ -121,13 +124,16 @@ test("× next to the folder starts a top-level chat; New thread then defaults to
     await expect(picker).toHaveValue(folder.id);
     await expect(window.getByRole("button", { name: "Start without a folder" })).toBeVisible();
 
-    // Folder grouping lists chats in their own group, ahead of the folders.
+    // Folder grouping lists the chat as a loose row above the folder, with no Chats group.
     await chooseThreadGrouping(window, "workspace");
-    const chatsGroup = window.locator('[data-chats-group="true"]');
-    await expect(chatsGroup).toBeVisible();
-    await expect(chatsGroup.locator(".workspace-row__name")).toHaveText("Chats");
-    await expect(chatsGroup.locator(".session-row")).toHaveCount(1);
-    await expect(chatsGroup.getByRole("button", { name: /Workspace actions/ })).toHaveCount(0);
+    const loose = window.getByTestId("top-level-threads");
+    await expect(loose.locator(".session-row")).toHaveCount(1);
+    await expect(window.locator(".workspace-row")).toHaveCount(1);
+    await expect(window.locator(".workspace-row__name")).toHaveText(folder.name);
+    await expect(window.getByText("Chats", { exact: true })).toHaveCount(0);
+    const looseBox = await loose.boundingBox();
+    const folderBox = await window.locator(".workspace-row").boundingBox();
+    expect(looseBox && folderBox && looseBox.y < folderBox.y).toBeTruthy();
   } finally {
     await harness.close();
   }

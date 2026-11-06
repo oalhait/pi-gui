@@ -60,8 +60,11 @@ export interface RecencyThreadSection {
 export interface ThreadSidebarModel {
   readonly folders: readonly WorkspaceRecord[];
   readonly workspaceGroups: readonly WorkspaceThreadGroup[];
-  /** Top-level chats outside any project, when any exist. Folder grouping lists them first. */
-  readonly chatsGroup?: WorkspaceThreadGroup;
+  /**
+   * Threads outside any project folder. Folder grouping lists them as loose rows above the
+   * folders; time grouping mixes them into the date sections like any other thread.
+   */
+  readonly topLevelThreads: readonly ThreadListEntry[];
   readonly pinnedThreads: readonly ThreadListEntry[];
   readonly recencySections: readonly RecencyThreadSection[];
   readonly archivedThreads: readonly ThreadListEntry[];
@@ -101,21 +104,13 @@ export function buildThreadSidebarModel(
 
   const folders = listFolders(state);
   const chats = state.workspaces.find((workspace) => workspace.kind === "chats");
-  const hasChats = chats ? entries.some((entry) => entry.folderId === chats.id) : false;
   return {
     folders,
     workspaceGroups: folders.map((workspace) => ({
       workspace,
       threads: historyThreads.filter((entry) => entry.folderId === workspace.id),
     })),
-    ...(chats && hasChats
-      ? {
-          chatsGroup: {
-            workspace: chats,
-            threads: historyThreads.filter((entry) => entry.folderId === chats.id),
-          },
-        }
-      : {}),
+    topLevelThreads: chats ? historyThreads.filter((entry) => entry.folderId === chats.id) : [],
     pinnedThreads,
     recencySections: RECENCY_BUCKET_ORDER.flatMap((bucket) => {
       const threads = historyByBucket.get(bucket);
@@ -232,7 +227,8 @@ function collectThreadEntries(state: DesktopAppState): ThreadListEntry[] {
         workspaceId: chats.id,
         session,
         environment: { kind: "local" as const, label: "Local" },
-        contextLabel: chats.name,
+        // No folder to name: the row shows only its title.
+        contextLabel: "",
       }))
     : [];
   const folders = listFolders(state);
@@ -308,6 +304,8 @@ export function workspaceHistoryExpansionKey(workspaceId: string): string {
   return `workspace:${workspaceId}`;
 }
 
+export const TOP_LEVEL_HISTORY_EXPANSION_KEY = "top-level";
+
 export function recencyHistoryExpansionKey(bucket: RecencyBucketId): string {
   return `bucket:${bucket}`;
 }
@@ -330,17 +328,20 @@ export function visibleThreadShortcutOrder(
   const unpinned =
     options.grouping === "workspace"
       ? [
-          ...(options.model.chatsGroup ? [options.model.chatsGroup] : []),
-          ...options.model.workspaceGroups,
+          ...threadHistoryPreview(
+            options.model.topLevelThreads,
+            expandedHistory.has(TOP_LEVEL_HISTORY_EXPANSION_KEY),
+          ).visible,
+          ...options.model.workspaceGroups
+            .filter((group) => !collapsedWorkspaceIds.has(group.workspace.id))
+            .flatMap(
+              (group) =>
+                threadHistoryPreview(
+                  group.threads,
+                  expandedHistory.has(workspaceHistoryExpansionKey(group.workspace.id)),
+                ).visible,
+            ),
         ]
-          .filter((group) => !collapsedWorkspaceIds.has(group.workspace.id))
-          .flatMap(
-            (group) =>
-              threadHistoryPreview(
-                group.threads,
-                expandedHistory.has(workspaceHistoryExpansionKey(group.workspace.id)),
-              ).visible,
-          )
       : options.model.recencySections.flatMap(
           (section) =>
             threadHistoryPreview(

@@ -41,7 +41,7 @@ Window-scoped state actions remain serialized because the shared application pro
 
 Catalog storage owns workspace, session, worktree, and session-file metadata. Desktop persistence owns UI state, composer attachments, and scheduled tasks (`scheduled-tasks.json`). The driver and worktree manager share the same catalog instance so their writes use one coordination boundary.
 
-Top-level chats (threads outside any project) are an ordinary catalog workspace backed by the app-owned `<userData>/chats` folder, because Pi needs a working directory. Startup creates and syncs it after the user's folders; state marks it `kind: "chats"` and lists it last. The renderer shows it as Chats rather than a folder, and main refuses to rename, remove, or create worktrees for it.
+Top-level chats (threads outside any project) are an ordinary catalog workspace backed by the app-owned `<userData>/chats` folder, because Pi needs a working directory. Startup creates and syncs it after the user's folders; state marks it `kind: "chats"` and lists it last. The renderer shows its threads as top-level threads, with no folder row or label, and main refuses to rename, remove, or create worktrees for it.
 
 UI-state and attachment decoders reject malformed fields, unsupported fields, and unsupported versions instead of dropping unknown data. Startup stops with a visible diagnostic when UI-state read, restoration, or legacy attachment migration fails, before workspace sync, pruning, or another persistence write can replace the saved bytes. A corrupt scheduled-tasks file is isolated: the rest of the app still starts, the runner stays off, and the original bytes are not overwritten.
 

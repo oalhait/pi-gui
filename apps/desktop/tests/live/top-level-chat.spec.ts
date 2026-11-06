@@ -79,7 +79,7 @@ test("a top-level chat streams a real reply and runs a tool with no folder open"
     );
     expect(tool?.status).toBe("success");
     expect(JSON.stringify(tool?.output)).toContain(chatsPath);
-    await expect(window.locator(".topbar__workspace")).toHaveText("Chats");
+    await expect(window.locator(".topbar__workspace")).toHaveCount(0);
     await window.screenshot({ path: test.info().outputPath("top-level-chat.png") });
   } finally {
     await harness.close();

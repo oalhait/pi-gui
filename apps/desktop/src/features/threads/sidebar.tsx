@@ -38,7 +38,6 @@ import type {
 } from "../../../contracts/desktop-state";
 import {
   ArchiveIcon,
-  ChatIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -67,6 +66,7 @@ import type { ThreadMenuState } from "./hooks/use-thread-actions";
 import { archiveThreadShortcut, ThreadActionsMenu } from "./thread-actions";
 import {
   recencyHistoryExpansionKey,
+  TOP_LEVEL_HISTORY_EXPANSION_KEY,
   flattenThreadTrees,
   sessionThreadKey,
   threadHistoryPreview,
@@ -192,8 +192,7 @@ export function Sidebar(props: SidebarProps) {
       },
     );
   };
-  const chatsGroup = threadSidebarModel.chatsGroup;
-  const chatsGroups = chatsGroup ? [chatsGroup] : [];
+  const topLevelThreads = threadSidebarModel.topLevelThreads;
   const shortcutOrder = visibleThreadShortcutOrder({
     grouping: threadGrouping,
     model: threadSidebarModel,
@@ -236,18 +235,17 @@ export function Sidebar(props: SidebarProps) {
       ...threadSidebarModel.recencySections
         .filter((section) => holds(section.threads))
         .map((section) => recencyHistoryExpansionKey(section.bucket)),
-      ...[...chatsGroups, ...threadSidebarModel.workspaceGroups]
+      ...threadSidebarModel.workspaceGroups
         .filter((group) => holds(group.threads))
         .map((group) => workspaceHistoryExpansionKey(group.workspace.id)),
+      ...(holds(topLevelThreads) ? [TOP_LEVEL_HISTORY_EXPANSION_KEY] : []),
     ];
     setExpandedHistory((current) =>
       keys.every((key) => current.has(key)) ? current : new Set([...current, ...keys]),
     );
     // A folded folder hides the rename field; open it so the input is reachable.
     // Time grouping shows no folder threads, so leave the folded set alone there.
-    for (const group of threadGrouping === "workspace"
-      ? [...chatsGroups, ...threadSidebarModel.workspaceGroups]
-      : []) {
+    for (const group of threadGrouping === "workspace" ? threadSidebarModel.workspaceGroups : []) {
       if (holds(group.threads) && collapsedFolderIds.has(group.workspace.id)) {
         setFolderCollapsed(group.workspace.id, false);
       }
@@ -604,26 +602,14 @@ export function Sidebar(props: SidebarProps) {
                     onSetSessionPinned={onSetSessionPinned}
                   />
                 ) : null}
-                {threadGrouping === "workspace" && chatsGroup ? (
-                  <ChatsGroupView
-                    group={chatsGroup}
-                    historyExpanded={expandedHistory.has(
-                      workspaceHistoryExpansionKey(chatsGroup.workspace.id),
-                    )}
-                    onToggleHistory={() =>
-                      toggleHistoryExpanded(workspaceHistoryExpansionKey(chatsGroup.workspace.id))
-                    }
-                    collapsed={collapsedFolderIds.has(chatsGroup.workspace.id)}
-                    onToggleCollapsed={() =>
-                      setFolderCollapsed(
-                        chatsGroup.workspace.id,
-                        !collapsedFolderIds.has(chatsGroup.workspace.id),
-                      )
-                    }
+                {threadGrouping === "workspace" && topLevelThreads.length > 0 ? (
+                  <TopLevelThreadsView
+                    threads={topLevelThreads}
+                    historyExpanded={expandedHistory.has(TOP_LEVEL_HISTORY_EXPANSION_KEY)}
+                    onToggleHistory={() => toggleHistoryExpanded(TOP_LEVEL_HISTORY_EXPANSION_KEY)}
                     selectedWorkspace={selectedWorkspace}
                     selectedSession={selectedSession}
                     threadMenu={threadMenu}
-                    onNewThread={onNewThread}
                     onArchiveSession={onArchiveSession}
                     onSelectSession={onSelectSession}
                     onSetSessionPinned={onSetSessionPinned}
@@ -1062,30 +1048,24 @@ function WorkspaceFolderContent(
   );
 }
 
-/** Top-level chats in folder grouping: like a folder, without folder actions or reordering. */
-function ChatsGroupView({
-  group,
+/** Threads outside any folder, drawn as loose rows above the folders in folder grouping. */
+function TopLevelThreadsView({
+  threads,
   historyExpanded,
   onToggleHistory,
-  collapsed,
-  onToggleCollapsed,
   selectedWorkspace,
   selectedSession,
   threadMenu,
-  onNewThread,
   onArchiveSession,
   onSelectSession,
   onSetSessionPinned,
 }: {
-  readonly group: WorkspaceThreadGroup;
+  readonly threads: readonly ThreadListEntry[];
   readonly historyExpanded: boolean;
   readonly onToggleHistory: () => void;
-  readonly collapsed: boolean;
-  readonly onToggleCollapsed: () => void;
   readonly selectedWorkspace: WorkspaceRecord | undefined;
   readonly selectedSession: SessionRecord | undefined;
   readonly threadMenu: ThreadMenuState;
-  readonly onNewThread: (workspaceId?: string) => void;
   readonly onArchiveSession: (target: { workspaceId: string; sessionId: string }) => void;
   readonly onSelectSession: (target: { workspaceId: string; sessionId: string }) => void;
   readonly onSetSessionPinned: (
@@ -1093,77 +1073,29 @@ function ChatsGroupView({
     pinned: boolean,
   ) => void;
 }) {
-  const { workspace, threads } = group;
-  const history = collapsed ? undefined : threadHistoryPreview(threads, historyExpanded);
-  const collapsible = threads.length > 0;
+  const history = threadHistoryPreview(threads, historyExpanded);
   return (
-    <section className="workspace-group" data-workspace-id={workspace.id} data-chats-group="true">
-      <div
-        className={`workspace-row ${workspace.id === selectedWorkspace?.id ? "workspace-row--active" : ""}`}
-      >
-        <button
-          className="workspace-row__select"
-          type="button"
-          aria-expanded={collapsible ? !collapsed : undefined}
-          onClick={() => {
-            if (collapsible) onToggleCollapsed();
-          }}
-        >
-          <span
-            className="workspace-row__icon"
-            aria-hidden="true"
-            data-state={collapsible ? (collapsed ? "collapsed" : "expanded") : undefined}
-          >
-            <span className="workspace-row__icon-folder">
-              <ChatIcon />
-            </span>
-            {collapsible ? (
-              <span className="workspace-row__icon-chevron">
-                {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
-              </span>
-            ) : null}
-          </span>
-          <span className="workspace-row__name">{workspace.name}</span>
-        </button>
-        <span className="workspace-row__actions">
-          <button
-            aria-label="New chat"
-            className="icon-button workspace-row__action-button"
-            title="New chat"
-            type="button"
-            onClick={() => {
-              if (collapsed) onToggleCollapsed();
-              onNewThread(workspace.id);
-            }}
-          >
-            <PlusIcon />
-          </button>
-        </span>
+    <section className="top-level-threads" data-testid="top-level-threads">
+      <div className="session-list session-list--history">
+        {history.visible.map((thread) => (
+          <HistoryThreadRow
+            key={`${thread.workspaceId}:${thread.session.id}`}
+            thread={thread}
+            selectedWorkspace={selectedWorkspace}
+            selectedSession={selectedSession}
+            threadMenu={threadMenu}
+            onArchiveSession={onArchiveSession}
+            onSelectSession={onSelectSession}
+            onSetSessionPinned={onSetSessionPinned}
+          />
+        ))}
       </div>
-      {history ? (
-        <>
-          <div className="session-list session-list--history">
-            {history.visible.map((thread) => (
-              <HistoryThreadRow
-                key={`${thread.workspaceId}:${thread.session.id}`}
-                thread={thread}
-                selectedWorkspace={selectedWorkspace}
-                selectedSession={selectedSession}
-                threadMenu={threadMenu}
-                onArchiveSession={onArchiveSession}
-                onSelectSession={onSelectSession}
-                onSetSessionPinned={onSetSessionPinned}
-              />
-            ))}
-          </div>
-          {history.overflow ? (
-            <HistoryToggle
-              expanded={historyExpanded}
-              label={workspace.name}
-              onToggle={onToggleHistory}
-            />
-          ) : null}
-        </>
+      {history.overflow ? (
+        <HistoryToggle
+          expanded={historyExpanded}
+          label="threads without a folder"
+          onToggle={onToggleHistory}
+        />
       ) : null}
     </section>
   );
@@ -1759,7 +1691,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
     const children = thread.children ?? [];
     const childrenOpen = !tree?.collapsed.has(threadKey);
     const pinned = Boolean(thread.session.pinnedAt);
-    const actionContext = showContext ? ` in ${thread.contextLabel}` : "";
+    const actionContext = showContext && thread.contextLabel ? ` in ${thread.contextLabel}` : "";
     const shortcut = tree?.shortcuts?.get(sessionThreadKey(thread));
     const shortcutBadge = overlay ? undefined : shortcut;
     const menuOpen =
@@ -1840,7 +1772,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
               <span className="session-row__title-line">
                 <span className="session-row__title">{thread.session.title}</span>
               </span>
-              {showContext ? (
+              {showContext && thread.contextLabel ? (
                 <span className="session-row__context">{thread.contextLabel}</span>
               ) : null}
             </span>

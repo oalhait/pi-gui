@@ -13,6 +13,7 @@ import {
   recencyHistoryExpansionKey,
   sessionThreadKey,
   threadHistoryPreview,
+  TOP_LEVEL_HISTORY_EXPANSION_KEY,
   visibleThreadShortcutOrder,
   workspaceHistoryExpansionKey,
 } from "../../src/features/threads/thread-groups";
@@ -539,7 +540,7 @@ test("malformed cycles cannot hide sessions or loop during hierarchy traversal",
   expect(visible).toHaveLength(3);
 });
 
-test("top-level chats join the recency list and get their own group, never a folder", () => {
+test("threads without a folder join the recency list and stay loose, never a folder", () => {
   const chats = workspace(
     "chats",
     "Chats",
@@ -556,7 +557,7 @@ test("top-level chats join the recency list and get their own group, never a fol
 
   expect(model.folders.map((folder) => folder.id)).toEqual(["alpha"]);
   expect(model.workspaceGroups.map((group) => group.workspace.id)).toEqual(["alpha"]);
-  expect(model.chatsGroup?.threads.map((thread) => thread.session.id)).toEqual([
+  expect(model.topLevelThreads.map((thread) => thread.session.id)).toEqual([
     "chat-new",
     "chat-old",
   ]);
@@ -565,26 +566,41 @@ test("top-level chats join the recency list and get their own group, never a fol
     "alpha-today",
     "chat-old",
   ]);
-  expect(model.recencyOrder[0]?.contextLabel).toBe("Chats");
+  // No folder label: the row shows only its title.
+  expect(model.recencyOrder[0]?.contextLabel).toBe("");
   expect(model.recencyOrder[0]?.environment.kind).toBe("local");
 
-  // Folder grouping numbers the Chats group's rows before the folders'.
+  // Folder grouping numbers the loose rows before the folders' rows.
   const order = visibleThreadShortcutOrder({ grouping: "workspace", model });
   expect(order.map((thread) => thread.session.id)).toEqual(["chat-new", "chat-old", "alpha-today"]);
-  const folded = visibleThreadShortcutOrder({
-    grouping: "workspace",
-    model,
-    collapsedWorkspaceIds: ["chats"],
-  });
-  expect(folded.map((thread) => thread.session.id)).toEqual(["alpha-today"]);
 });
 
-test("an empty Chats workspace adds no group", () => {
+test("loose threads show five rows until expanded", () => {
+  const chats = workspace(
+    "chats",
+    "Chats",
+    Array.from({ length: 7 }, (_, index) =>
+      session(`chat-${index}`, `Chat ${index}`, { updatedAt: isoDaysAgo(index) }),
+    ),
+    { kind: "chats" },
+  );
+  const model = buildThreadSidebarModel(state([chats]), nowMs);
+  expect(visibleThreadShortcutOrder({ grouping: "workspace", model })).toHaveLength(5);
+  expect(
+    visibleThreadShortcutOrder({
+      grouping: "workspace",
+      model,
+      expandedHistory: new Set([TOP_LEVEL_HISTORY_EXPANSION_KEY]),
+    }),
+  ).toHaveLength(7);
+});
+
+test("an empty Chats workspace adds no rows", () => {
   const model = buildThreadSidebarModel(
     state([workspace("chats", "Chats", [], { kind: "chats" })]),
     nowMs,
   );
-  expect(model.chatsGroup).toBeUndefined();
+  expect(model.topLevelThreads).toEqual([]);
   expect(model.folders).toEqual([]);
   expect(model.recencyOrder).toEqual([]);
 });
