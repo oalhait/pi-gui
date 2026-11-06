@@ -8,7 +8,8 @@ Users create local on-device schedules from the Scheduled sidebar, a thread menu
 - `scheduled-interview`: Create with pi prefills the interview draft and does not send.
 - `scheduled-fire`: a due task sends its instruction and labels **Sent by scheduled task**.
 - `scheduled-tool`: `create_scheduled_task` / `list_scheduled_tasks` / `update_scheduled_task` mutate the same records. Settings > Skills and extensions > Extensions > pi-gui tools has an "Enable Scheduled tasks" switch; off, the agent has no scheduled-task tools. No spec turns it off.
-- `scheduled-chip`: a thread bound to a task that is not completed shows `scheduled-task-chip` with an Open button; only its visibility is covered, in `scheduled-tasks.spec.ts`.
+- `scheduled-chip`: only a thread bound to an **active** task shows `scheduled-task-chip` with an Open button above the composer; paused and completed tasks are not pinned. Covered in `scheduled-tasks.spec.ts`.
+- `thread-menu-automations`: the thread header "…" menu (`thread-header-menu-panel`) lists every task attached to the thread (target or origin) with status, opens each in the editor, and pauses/resumes it (`thread-menu-automation-toggle`). Covered in `scheduled-tasks.spec.ts`.
 
 ## How to get to it (user POV)
 
