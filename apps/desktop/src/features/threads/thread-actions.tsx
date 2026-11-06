@@ -132,6 +132,15 @@ interface ThreadActionsMenuProps {
 export function ThreadActionsMenu({ actions, className }: ThreadActionsMenuProps) {
   return (
     <div className={`workspace-menu ${className}`} role="menu">
+      <ThreadActionItems actions={actions} />
+    </div>
+  );
+}
+
+/** The action buttons alone, for menus that add their own sections around them. */
+export function ThreadActionItems({ actions }: { readonly actions: readonly ThreadAction[] }) {
+  return (
+    <>
       {actions.map((action) => (
         <button
           key={action.id}
@@ -152,6 +161,6 @@ export function ThreadActionsMenu({ actions, className }: ThreadActionsMenuProps
           ) : null}
         </button>
       ))}
-    </div>
+    </>
   );
 }

@@ -1033,7 +1033,7 @@ export default function App() {
           panelAvailable={sidePanelAvailable}
           panelVisible={sidePanelVisible}
           editorControl={
-            selectedWorkspace ? (
+            selectedWorkspace && !(snapshot.activeView === "threads" && selectedSession) ? (
               <OpenInEditorButton state={openInEditor} onOpenFolder={openSelectedWorkspaceFolder} />
             ) : undefined
           }
@@ -1048,6 +1048,8 @@ export default function App() {
               runningLabel={runningLabel}
               session={selectedSession}
               threadMenu={threadMenu}
+              openInEditor={openInEditor}
+              onOpenFolder={openSelectedWorkspaceFolder}
             />
           ) : null}
         </Topbar>

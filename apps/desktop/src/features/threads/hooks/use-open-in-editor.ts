@@ -20,7 +20,8 @@ export interface OpenInEditorState {
   readonly targetEditorId: string | undefined;
   readonly wrapRef: RefObject<HTMLDivElement | null>;
   readonly toggleMenu: () => void;
-  readonly openIn: () => void;
+  /** Opens the workspace in `editorId`, or in the preferred editor when omitted. */
+  readonly openIn: (editorId?: string) => void;
   /** Changes the main button's target without launching anything. */
   readonly selectEditor: (editorId: string) => void;
 }
@@ -94,43 +95,46 @@ export function useOpenInEditor(params: UseOpenInEditorParams): OpenInEditorStat
     setMenuOpen((current) => !current);
   }, []);
 
-  const openIn = useCallback(() => {
-    if (!api || !workspaceId || busy || loading) {
-      return;
-    }
-    setError(undefined);
-    const target = list.preferredEditorId ?? list.editors[0]?.id;
-    if (!target) {
-      setMenuOpen(false);
-      onOpenFolder();
-      return;
-    }
-    setBusy(true);
-    void api
-      .openWorkspaceInEditor(workspaceId, target)
-      .then((next) => {
-        setList(next);
+  const openIn = useCallback(
+    (editorId?: string) => {
+      if (!api || !workspaceId || busy || loading) {
+        return;
+      }
+      setError(undefined);
+      const target = editorId ?? list.preferredEditorId ?? list.editors[0]?.id;
+      if (!target) {
         setMenuOpen(false);
-      })
-      .catch((cause: unknown) => {
-        console.error("[renderer] openWorkspaceInEditor failed", cause);
-        setError("Could not open that editor. Try another one.");
-        // Keep the menu open so the failure is visible, and re-request the
-        // list because main just dropped its cache after the failed launch.
-        setMenuOpen(true);
-        void api
-          .listEditors()
-          .then((refreshed) => {
-            setList(refreshed);
-          })
-          .catch((refreshCause: unknown) => {
-            console.error("[renderer] listEditors refresh failed", refreshCause);
-          });
-      })
-      .finally(() => {
-        setBusy(false);
-      });
-  }, [api, busy, list.editors, list.preferredEditorId, loading, onOpenFolder, workspaceId]);
+        onOpenFolder();
+        return;
+      }
+      setBusy(true);
+      void api
+        .openWorkspaceInEditor(workspaceId, target)
+        .then((next) => {
+          setList(next);
+          setMenuOpen(false);
+        })
+        .catch((cause: unknown) => {
+          console.error("[renderer] openWorkspaceInEditor failed", cause);
+          setError("Could not open that editor. Try another one.");
+          // Keep the menu open so the failure is visible, and re-request the
+          // list because main just dropped its cache after the failed launch.
+          setMenuOpen(true);
+          void api
+            .listEditors()
+            .then((refreshed) => {
+              setList(refreshed);
+            })
+            .catch((refreshCause: unknown) => {
+              console.error("[renderer] listEditors refresh failed", refreshCause);
+            });
+        })
+        .finally(() => {
+          setBusy(false);
+        });
+    },
+    [api, busy, list.editors, list.preferredEditorId, loading, onOpenFolder, workspaceId],
+  );
 
   /**
    * Chooses which editor the main button targets. Selection never launches:

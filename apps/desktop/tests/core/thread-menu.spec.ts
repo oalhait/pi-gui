@@ -15,7 +15,7 @@ const proofDir = process.env.PI_APP_THREAD_MENU_PROOF_DIR;
 
 async function menuItemTitles(menu: Locator): Promise<string[]> {
   return menu
-    .locator(".workspace-menu__item > span:first-child")
+    .locator("[data-thread-action] > span:first-child")
     .evaluateAll((items) => items.map((item) => item.textContent ?? ""));
 }
 
