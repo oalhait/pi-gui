@@ -6,6 +6,7 @@ import {
   KeyboardIcon,
   ModelIcon,
   PlugIcon,
+  ServerIcon,
   SettingsIcon,
   SkillIcon,
   SunIcon,
@@ -64,6 +65,15 @@ export const SETTINGS_SECTIONS = [
     icon: <KeyboardIcon />,
     keywords: ["keys", "hotkeys", "keybindings"],
     descriptionKey: "settings.section.shortcuts.description",
+    needsWorkspace: false,
+  },
+  {
+    id: "remote-hosts",
+    titleKey: "settings.nav.remoteHosts",
+    groupKey: "settings.group.app",
+    icon: <ServerIcon />,
+    keywords: ["ssh", "server", "remote", "devbox", "host", "cloud"],
+    descriptionKey: "settings.section.remoteHosts.description",
     needsWorkspace: false,
   },
   {

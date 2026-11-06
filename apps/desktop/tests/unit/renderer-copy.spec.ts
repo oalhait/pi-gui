@@ -20,6 +20,11 @@ const technicalCopy = new Set([
   "/v1",
   "~/.pi/agent/models.json",
   "/bin/zsh",
+  "devbox",
+  "~/.ssh/id_ed25519",
+  "/usr/bin/node",
+  "~/.pi-gui-host",
+  "/home/you/project",
 ]);
 const attributes = new Set([
   "title",
