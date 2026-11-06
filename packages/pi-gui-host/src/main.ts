@@ -19,9 +19,29 @@ Commands (each daemon command prints one JSON object):
   proxy [--start]  Connect stdin/stdout to the server (--start starts it first)
   serve            Run the server in the foreground
 
-PI_GUI_HOST_HOME sets the state directory (default ~/.pi-gui-host).`;
+--home <dir> or PI_GUI_HOST_HOME sets the state directory (default ~/.pi-gui-host).`;
 
 const entryScript = fileURLToPath(import.meta.url);
+
+/** `--home <dir>` (from pi-gui) wins over PI_GUI_HOST_HOME; it is removed from the arguments. */
+function takeHomeOption(argv: string[]): string | undefined {
+  const index = argv.indexOf("--home");
+  if (index === -1) {
+    return undefined;
+  }
+  const [, value] = argv.splice(index, 2);
+  if (!value) {
+    throw new Error("--home needs a directory");
+  }
+  return value;
+}
+
+const args = process.argv.slice(2);
+const homeOption = takeHomeOption(args);
+if (homeOption) {
+  // The detached server inherits it through the environment.
+  process.env.PI_GUI_HOST_HOME = homeOption;
+}
 const paths = hostPaths();
 
 function printJson(value: unknown): void {
@@ -110,7 +130,7 @@ async function main(argv: readonly string[]): Promise<number> {
   return 2;
 }
 
-main(process.argv.slice(2)).then(
+main(args).then(
   (code) => {
     if (code >= 0) {
       process.exitCode = code;
