@@ -46,6 +46,7 @@ import type {
   CreateWorktreeInput,
   DesktopAppState,
   ForkThreadInput,
+  MoveThreadInput,
   ModelSettingsScopeMode,
   NotificationPreferences,
   RemoveWorktreeInput,
@@ -172,6 +173,7 @@ export const desktopIpc = {
   createSession: "pi-gui:create-session",
   startThread: "pi-gui:start-thread",
   forkThread: "pi-gui:fork-thread",
+  moveThread: "pi-gui:move-thread",
   sendChildThreadFollowUp: "pi-gui:send-child-thread-follow-up",
   setChildSupervisionLoop: "pi-gui:set-child-supervision-loop",
   createScheduledTask: "pi-gui:create-scheduled-task",
@@ -821,6 +823,8 @@ export interface PiDesktopApi {
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;
   startThread(input: StartThreadInput): Promise<DesktopAppState>;
   forkThread(input: ForkThreadInput): Promise<DesktopAppState>;
+  /** Moves an idle thread to another project folder or out of any folder; history comes along. */
+  moveThread(input: MoveThreadInput): Promise<DesktopAppState>;
   sendChildThreadFollowUp(input: SendChildThreadFollowUpInput): Promise<DesktopAppState>;
   setChildSupervisionLoop(input: SetChildSupervisionLoopInput): Promise<DesktopAppState>;
   createScheduledTask(input: CreateScheduledTaskInput): Promise<DesktopAppState>;

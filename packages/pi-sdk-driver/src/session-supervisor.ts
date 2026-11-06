@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { access, realpath, stat, unlink } from "node:fs/promises";
+import { access, realpath, rename, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ModelRegistry,
@@ -30,6 +30,7 @@ import type {
   CreateSessionOptions,
   ExtensionFlagValues,
   ForkSessionOptions,
+  MoveSessionOptions,
   ForkSessionResult,
   HostUiRequest,
   HostUiResponse,
@@ -954,11 +955,27 @@ export class SessionSupervisor {
       branchedManager = forked;
     }
 
-    const forkConfig = deriveSessionConfig(branchedManager);
+    const snapshot = await this.openRecordFromManager(
+      targetWorkspace,
+      branchedManager,
+      options.title ?? sourceRecord.title,
+      options.extensionFlagValues,
+    );
+    return selectedText === undefined ? { snapshot } : { snapshot, selectedText };
+  }
+
+  /** Binds a runtime to a session file already written in the target folder, as a new record. */
+  private async openRecordFromManager(
+    targetWorkspace: WorkspaceRef,
+    manager: SessionManager,
+    title: string,
+    extensionFlagValues: ForkSessionOptions["extensionFlagValues"],
+  ): Promise<SessionSnapshot> {
+    const forkConfig = deriveSessionConfig(manager);
     const forkProvider = forkConfig?.provider;
     const forkModelId = forkConfig?.modelId;
     const createOptions: PiCreateAgentSessionOptions = {
-      ...this.baseCreateOptions(targetWorkspace, branchedManager, options.extensionFlagValues),
+      ...this.baseCreateOptions(targetWorkspace, manager, extensionFlagValues),
       ...(forkProvider && forkModelId
         ? {
             // A model the source session used may not exist in the target
@@ -979,7 +996,6 @@ export class SessionSupervisor {
     const runtime = await this.createAgentSessionRuntimeImpl(createOptions);
     const session = runtime.session;
 
-    const title = options.title ?? sourceRecord.title;
     const record = this.createRecord(targetWorkspace, runtime, title);
     forcePersistPiSession(session.sessionManager);
     record.config = deriveSessionConfig(session.sessionManager);
@@ -1000,7 +1016,69 @@ export class SessionSupervisor {
       timestamp: nowIso(),
       snapshot,
     });
-    return selectedText === undefined ? { snapshot } : { snapshot, selectedText };
+    return snapshot;
+  }
+
+  async moveSession(sourceRef: SessionRef, options: MoveSessionOptions): Promise<SessionSnapshot> {
+    const sourceRecord = await this.ensureRecord(sourceRef);
+    for (let write; (write = this.stopMarkWrites.get(sessionKey(sourceRecord.ref)));) await write;
+    const session = this.requireSession(sourceRecord);
+    // A failed thread can move; one with anything in flight cannot.
+    if (hasWorkInFlight(sourceRecord, session) || sourceRecord.status === "running") {
+      throw new Error("Only an idle thread can move. Wait for its run to finish, then try again.");
+    }
+    const sourceFile = sourceRecord.sessionFile ?? session.sessionManager.getSessionFile();
+    if (!sourceFile) {
+      throw new Error(`Thread ${sessionKey(sourceRef)} has no session file to move.`);
+    }
+    const targetWorkspace = options.targetWorkspace;
+    if (resolve(targetWorkspace.path) === resolve(sourceRecord.workspace.path)) {
+      throw new Error("The thread is already in that folder.");
+    }
+    if (this.records.has(sessionKey({ ...sourceRef, workspaceId: targetWorkspace.workspaceId }))) {
+      throw new Error("That folder already has a thread with this id.");
+    }
+
+    await this.registerWorkspaceRef(targetWorkspace);
+    // Same id, so the thread keeps its identity; pi writes the copy under the target folder.
+    const moved = SessionManager.forkFrom(sourceFile, targetWorkspace.path, undefined, {
+      id: sourceRef.sessionId,
+    });
+    const movedFile = moved.getSessionFile();
+    let snapshot: SessionSnapshot;
+    try {
+      snapshot = await this.openRecordFromManager(
+        targetWorkspace,
+        moved,
+        sourceRecord.title,
+        options.extensionFlagValues,
+      );
+    } catch (error) {
+      await removeIntermediateForkSession(movedFile, undefined);
+      throw error;
+    }
+
+    // Retire the original only once the copy is open. Its file is renamed, not deleted, so
+    // neither pi-gui nor pi lists it in the old folder and the bytes stay recoverable.
+    const key = sessionKey(sourceRecord.ref);
+    sourceRecord.unsubscribeAgent?.();
+    sourceRecord.unsubscribeAgent = undefined;
+    sourceRecord.listeners.clear();
+    await this.disposeRecordRuntimeSafely(sourceRecord);
+    this.records.delete(key);
+    await this.catalogs.sessions.deleteSession(sourceRecord.ref);
+    await this.catalogs.deleteSessionFile(sourceRecord.ref);
+    try {
+      await rename(sourceFile, `${sourceFile}.moved`);
+    } catch (error) {
+      // The copy is already in place; a failed rename only leaves the original listed too.
+      console.warn(
+        `[pi-sdk-driver] moved ${key} but could not set the original aside: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    return snapshot;
   }
 
   private async resolveForkSource(
@@ -1072,18 +1150,7 @@ export class SessionSupervisor {
     // fail) before the checks below; nothing awaits between the last one and the checks.
     for (let write; (write = this.stopMarkWrites.get(sessionKey(record.ref)));) await write;
     const session = this.requireSession(record);
-    if (
-      isRecordBusy(record) ||
-      record.runAwaitingSettle ||
-      record.status !== "idle" ||
-      record.queuedMessages.length > 0 ||
-      record.queuedStartScheduled ||
-      record.sendsSettling > 0 ||
-      record.queueStepsPending > 0 ||
-      session.pendingMessageCount > 0 ||
-      record.startingQueuedMessage ||
-      record.pendingHostUiRequests.size > 0
-    ) {
+    if (hasWorkInFlight(record, session) || record.status !== "idle") {
       throw new Error(
         "The thread is running, waiting, or has queued messages; it was not archived.",
       );
@@ -3618,6 +3685,21 @@ function clampThinkingLevel(level: string, availableLevels: readonly string[]): 
     }
   }
   return availableLevels[0] ?? "off";
+}
+
+/** A run, queue, pending send or open host dialog is in flight. */
+function hasWorkInFlight(record: ManagedSessionRecord, session: AgentSession): boolean {
+  return (
+    isRecordBusy(record) ||
+    record.runAwaitingSettle ||
+    record.queuedMessages.length > 0 ||
+    record.queuedStartScheduled ||
+    record.sendsSettling > 0 ||
+    record.queueStepsPending > 0 ||
+    session.pendingMessageCount > 0 ||
+    record.startingQueuedMessage !== undefined ||
+    record.pendingHostUiRequests.size > 0
+  );
 }
 
 async function createCanonicalWorkspaceRef(

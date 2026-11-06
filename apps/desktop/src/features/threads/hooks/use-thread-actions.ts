@@ -58,6 +58,16 @@ export interface ThreadMenuState {
   readonly archive: (target: WorkspaceSessionTarget) => void;
   readonly restore: (target: WorkspaceSessionTarget) => void;
   readonly setPinned: (target: WorkspaceSessionTarget, pinned: boolean) => void;
+  /** The thread the Move dialog is open for, with its progress. */
+  readonly move: MoveThreadState | null;
+  readonly closeMove: () => void;
+  readonly submitMove: (destinationWorkspaceId: string) => void;
+}
+
+export interface MoveThreadState {
+  readonly subject: ThreadActionSubject;
+  readonly submitting: boolean;
+  readonly error?: string;
 }
 
 export function useThreadActions({
@@ -72,6 +82,7 @@ export function useThreadActions({
   const [openMenu, setOpenMenu] = useState<OpenThreadMenu | null>(null);
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [move, setMove] = useState<MoveThreadState | null>(null);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const renamePanelRef = useRef<HTMLFormElement | null>(null);
 
@@ -131,6 +142,7 @@ export function useThreadActions({
     },
     setPinned: (subject, pinned) => setPinned(targetFor(subject), pinned),
     archive: (subject) => archive(targetFor(subject)),
+    startMove: (subject) => setMove({ subject, submitting: false }),
     restore: (subject) => restore(targetFor(subject)),
     markRead: (subject) => mutate((desktopApi) => desktopApi.markSessionRead(targetFor(subject))),
     markUnread: (subject) =>
@@ -197,5 +209,37 @@ export function useThreadActions({
     archive,
     restore,
     setPinned,
+    move,
+    closeMove: () => setMove(null),
+    submitMove: (destinationWorkspaceId) => {
+      if (!api || !move || move.submitting) return;
+      const { subject } = move;
+      // The thread's key changes, so send its pending draft first or it would be dropped.
+      flushComposerDraft();
+      setMove({ subject, submitting: true });
+      void updateSnapshot(setSnapshot, () =>
+        api.moveThread({ ...targetFor(subject), destinationWorkspaceId }),
+      ).then(
+        (state) => {
+          // Main reports a refused move as lastError and leaves the thread where it was.
+          const stayed = state.workspaces.some(
+            (workspace) =>
+              workspace.id === subject.workspaceId &&
+              workspace.sessions.some((session) => session.id === subject.session.id),
+          );
+          setMove(
+            stayed && state.lastError
+              ? { subject, submitting: false, error: state.lastError }
+              : null,
+          );
+        },
+        (error: unknown) =>
+          setMove({
+            subject,
+            submitting: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+      );
+    },
   };
 }

@@ -52,6 +52,7 @@ import {
   type DesktopAppState,
   type DesktopAppViewState,
   type ForkThreadInput,
+  type MoveThreadInput,
   type NotificationPreferences,
   type OrchestrationChildThread,
   type QueuedComposerMessage,
@@ -498,6 +499,7 @@ export class DesktopAppStore {
         this.recordExtensionFlags(sessionRef, applied, workspaceDefaults),
       reloadTranscriptFromDriver: (sessionRef) => this.reloadTranscriptFromDriver(sessionRef),
       setPendingAutoTitle: (sessionRef, pending) => this.setPendingAutoTitle(sessionRef, pending),
+      rekeySession: (from, to) => this.rekeySession(from, to),
       getPendingAutoTitle: (sessionRef) => this.getPendingAutoTitle(sessionRef),
       sendMessageToSession: (sessionRef, text, attachments, sendOptions) =>
         this.conversationOwner.sendMessageToSession(sessionRef, text, attachments, sendOptions),
@@ -1185,6 +1187,74 @@ export class DesktopAppStore {
 
   async createWorktree(input: CreateWorktreeInput): Promise<DesktopAppState> {
     return this.workspaceOwner.createWorktree(input);
+  }
+
+  async moveThread(input: MoveThreadInput): Promise<DesktopAppState> {
+    return this.workspaceOwner.moveThread(input);
+  }
+
+  /**
+   * Carries a moved thread's app-side state from its old key to its new one: draft and
+   * attachments, read/interaction times, pin and pin order, flags, user title, workbench
+   * layout, parent/child links and scheduled tasks. Caches rebuild for the new key.
+   */
+  private async rekeySession(from: SessionRef, to: SessionRef): Promise<void> {
+    const fromKey = sessionKey(from);
+    const toKey = sessionKey(to);
+    const state = this.sessionState;
+    const maps: Map<string, unknown>[] = [
+      state.composerDraftsBySession,
+      state.composerAttachmentsBySession,
+      state.lastViewedAtBySession,
+      state.lastInteractedAtBySession,
+      state.pinnedAtBySession,
+      state.extensionFlagsBySession,
+      this.taskWorkbenchTemplatesBySession,
+    ];
+    for (const map of maps) {
+      if (!map.has(fromKey)) continue;
+      map.set(toKey, map.get(fromKey));
+      map.delete(fromKey);
+    }
+    if (state.userTitledSessions.delete(fromKey)) state.userTitledSessions.add(toKey);
+    state.pinnedSessionOrder = state.pinnedSessionOrder.map((key) =>
+      key === fromKey ? toKey : key,
+    );
+    const attachments = await this.attachmentStore.read(fromKey);
+    if (attachments) {
+      await this.attachmentStore.write(toKey, attachments);
+      await this.attachmentStore.remove(fromKey);
+    }
+
+    const isFrom = (workspaceId: string, sessionId: string) =>
+      workspaceId === from.workspaceId && sessionId === from.sessionId;
+    const children = this.state.orchestrationChildren.map((child) => ({
+      ...child,
+      ...(isFrom(child.parentWorkspaceId, child.parentSessionId)
+        ? { parentWorkspaceId: to.workspaceId, parentSessionId: to.sessionId }
+        : {}),
+      ...(isFrom(child.childWorkspaceId, child.childSessionId)
+        ? { childWorkspaceId: to.workspaceId, childSessionId: to.sessionId }
+        : {}),
+    }));
+    let tasksChanged = false;
+    const scheduledTasks = this.state.scheduledTasks.map((task) => {
+      if (
+        task.target.kind !== "existing-thread" ||
+        !isFrom(task.target.workspaceId, task.target.sessionId)
+      ) {
+        return task;
+      }
+      tasksChanged = true;
+      return { ...task, target: { ...task.target, workspaceId: to.workspaceId } };
+    });
+    this.state = {
+      ...this.state,
+      ...this.orchestrationChildrenState(children),
+      scheduledTasks,
+    };
+    await this.persistUiState();
+    if (tasksChanged) await this.persistScheduledTasks();
   }
 
   async forkThread(input: ForkThreadInput): Promise<DesktopAppState> {

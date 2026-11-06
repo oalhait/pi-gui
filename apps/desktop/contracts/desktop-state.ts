@@ -467,6 +467,13 @@ export type ForkThreadInput = {
   readonly position?: ForkThreadPosition;
 };
 
+/** Moves an idle thread to another project folder, or out of any folder (the Chats workspace). */
+export interface MoveThreadInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly destinationWorkspaceId: string;
+}
+
 export interface RemoveWorktreeInput {
   readonly workspaceId: string;
   readonly worktreeId: string;

@@ -7,6 +7,7 @@ import {
   ChatIcon,
   ClockIcon,
   CopyIcon,
+  FolderIcon,
   PencilIcon,
   PinIcon,
   RestoreIcon,
@@ -21,6 +22,7 @@ export type ThreadActionId =
   | "rename-thread"
   | "pin-thread"
   | "archive-thread"
+  | "move-thread"
   | "restore-thread"
   | "mark-read"
   | "mark-unread"
@@ -47,6 +49,7 @@ export interface ThreadActionHandlers {
   readonly startRename: (subject: ThreadActionSubject) => void;
   readonly setPinned: (subject: ThreadActionSubject, pinned: boolean) => void;
   readonly archive: (subject: ThreadActionSubject) => void;
+  readonly startMove: (subject: ThreadActionSubject) => void;
   readonly restore: (subject: ThreadActionSubject) => void;
   readonly markRead: (subject: ThreadActionSubject) => void;
   readonly markUnread: (subject: ThreadActionSubject) => void;
@@ -101,6 +104,15 @@ export function buildThreadActions(
         run: () => handlers.archive(subject),
       },
     );
+    // Only an idle thread can move; main refuses anything else too.
+    if (session.status !== "running") {
+      actions.push({
+        id: "move-thread",
+        title: "Move to…",
+        icon: <FolderIcon />,
+        run: () => handlers.startMove(subject),
+      });
+    }
   }
   if (session.hasUnseenUpdate) {
     actions.push({

@@ -16,6 +16,7 @@ import type {
   CreateWorktreeInput,
   DesktopAppState,
   ForkThreadInput,
+  MoveThreadInput,
   RemoveWorktreeInput,
   StartThreadInput,
   ComposerAttachment,
@@ -41,6 +42,7 @@ type WorkspaceDriver = Pick<
   | "archiveSessionIfIdle"
   | "createSession"
   | "forkSession"
+  | "moveSession"
   | "generateThreadTitle"
   | "removeWorkspace"
   | "renameSession"
@@ -97,6 +99,8 @@ export interface WorkspaceOwnerHost {
   ): void;
   reloadTranscriptFromDriver(sessionRef: SessionRef): Promise<void>;
   setPendingAutoTitle(sessionRef: SessionRef, pending: PendingAutoTitle): void;
+  /** A moved thread's app-side state (draft, pins, read state, links, schedules) follows it. */
+  rekeySession(from: SessionRef, to: SessionRef): Promise<void>;
   getPendingAutoTitle(sessionRef: SessionRef): PendingAutoTitle | undefined;
   sendMessageToSession(
     sessionRef: SessionRef,
@@ -134,6 +138,7 @@ export interface WorkspaceOwner {
   removeWorktree(input: RemoveWorktreeInput): Promise<DesktopAppState>;
   startThread(input: StartThreadInput): Promise<DesktopAppState>;
   forkThread(input: ForkThreadInput): Promise<DesktopAppState>;
+  moveThread(input: MoveThreadInput): Promise<DesktopAppState>;
   reconcileWorktrees(): Promise<void>;
   syncAndListWorktrees(
     workspaces: Parameters<typeof worktree.syncAndListWorktrees>[1],
@@ -158,6 +163,7 @@ export function createWorkspaceOwner(store: WorkspaceOwnerHost): WorkspaceOwner 
     removeWorktree: (input) => worktree.removeWorktree(store, input),
     startThread: (input) => worktree.startThread(store, input),
     forkThread: (input) => worktree.forkThread(store, input),
+    moveThread: (input) => moveThread(store, input),
     reconcileWorktrees: () => worktree.reconcileWorktrees(store),
     syncAndListWorktrees: (workspaces) => worktree.syncAndListWorktrees(store, workspaces),
   };
@@ -494,6 +500,64 @@ async function createSession(
       composerDraft: "",
       clearLastError: true,
       activeView: "threads",
+    });
+  });
+}
+
+async function moveThread(
+  store: WorkspaceOwnerHost,
+  input: MoveThreadInput,
+): Promise<DesktopAppState> {
+  await store.initialize();
+  const sourceRef = toSessionRef(input);
+  const session = store.sessionFromState(sourceRef);
+  if (!session) {
+    return store.withError(`Unknown session: ${input.workspaceId}:${input.sessionId}`);
+  }
+  if (session.archivedAt) {
+    return store.withError("Restore the thread before moving it.");
+  }
+  const destination = store
+    .workspaceState()
+    .workspaces.find((workspace) => workspace.id === input.destinationWorkspaceId);
+  const destinationRef = store.workspaceRefFromState(input.destinationWorkspaceId);
+  if (!destination || !destinationRef) {
+    return store.withError(`Unknown workspace: ${input.destinationWorkspaceId}`);
+  }
+  if (destination.kind === "worktree") {
+    return store.withError("Move a thread to a project folder, or out of any folder.");
+  }
+  if (destination.id === sourceRef.workspaceId) {
+    return store.withError("The thread is already there.");
+  }
+
+  return store.withErrorHandling(async () => {
+    await store.cancelPendingDialogsForSession(sourceRef);
+    // The flags the thread started with, as far as the destination's extensions know them.
+    const flags = await store.resolveExtensionFlags(
+      destination.id,
+      store.extensionFlagsForSession(sourceRef),
+    );
+    const snapshot = await store.driver.moveSession(sourceRef, {
+      targetWorkspace: destinationRef,
+      extensionFlagValues: flags.applied,
+    });
+    store.clearPendingAutoTitle(sourceRef);
+    await store.rekeySession(sourceRef, snapshot.ref);
+    store.updateSessionConfig(snapshot.ref, snapshot.config);
+    store.recordExtensionFlags(snapshot.ref, flags.applied);
+    const state = store.workspaceState();
+    const wasSelected =
+      state.selectedWorkspaceId === sourceRef.workspaceId &&
+      state.selectedSessionId === sourceRef.sessionId;
+    if (wasSelected) {
+      store.setActiveSession(snapshot.ref);
+    }
+    await store.reloadTranscriptFromDriver(snapshot.ref);
+    return store.refreshState({
+      selectedWorkspaceId: wasSelected ? snapshot.ref.workspaceId : state.selectedWorkspaceId,
+      selectedSessionId: wasSelected ? snapshot.ref.sessionId : state.selectedSessionId,
+      clearLastError: true,
     });
   });
 }

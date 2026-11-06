@@ -40,6 +40,7 @@ import {
   expectCustomProviderConfig,
   expectCustomProviderProbeInput,
   expectForkThreadInput,
+  expectMoveThreadInput,
   expectHostUiResponse,
   expectMcpServerScope,
   expectModelSettingsScopeMode,
@@ -110,6 +111,7 @@ type ConversationOwner = Pick<
   | "createSession"
   | "startThread"
   | "forkThread"
+  | "moveThread"
   | "cancelCurrentRun"
   | "addComposerAttachments"
   | "removeComposerAttachment"
@@ -736,6 +738,9 @@ export function registerDesktopIpc({
   });
   ipcMain.handle(desktopIpc.forkThread, (event, rawInput: unknown) =>
     run(event, () => owners.conversation.forkThread(expectForkThreadInput(rawInput))),
+  );
+  ipcMain.handle(desktopIpc.moveThread, (event, rawInput: unknown) =>
+    run(event, () => owners.conversation.moveThread(expectMoveThreadInput(rawInput))),
   );
   ipcMain.handle(desktopIpc.sendChildThreadFollowUp, (event, rawInput: unknown) =>
     run(event, () =>

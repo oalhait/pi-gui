@@ -47,6 +47,7 @@ import { deriveModelOnboardingState } from "../features/settings/model-onboardin
 import type { SettingsSection } from "../features/settings/settings-view";
 import { SecondarySurfaces } from "./secondary-surfaces";
 import { NewThreadView } from "../features/threads/new-thread-view";
+import { MoveThreadDialogHost } from "../features/threads/move-thread-dialog";
 import {
   buildThreadSidebarModel,
   sessionThreadKey,
@@ -1075,10 +1076,7 @@ export default function App() {
             rootWorkspaceOptions.length > 0 ? (
               <NewThreadView
                 workspace={newThread.workspace}
-                folders={rootWorkspaceOptions.filter((workspace) => workspace.kind !== "chats")}
-                chatsWorkspaceId={
-                  rootWorkspaceOptions.find((workspace) => workspace.kind === "chats")?.id
-                }
+                destinations={rootWorkspaceOptions}
                 runtime={newThread.runtime}
                 environment={newThread.environment}
                 prompt={newThread.prompt}
@@ -1435,6 +1433,7 @@ export default function App() {
           onOpenChat={handleOpenScheduledChat}
         />
       ) : null}
+      <MoveThreadDialogHost threadMenu={threadMenu} destinations={rootWorkspaceOptions} />
       {threadSwitcher.state?.overlayVisible ? (
         <ThreadSwitcher state={threadSwitcher.state} onChoose={threadSwitcher.choose} />
       ) : null}

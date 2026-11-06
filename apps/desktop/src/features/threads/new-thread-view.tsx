@@ -34,10 +34,8 @@ import { ExtensionFlagsSelector } from "./extension-flags-selector";
 interface NewThreadViewProps {
   /** Where the thread starts: a project folder, or Chats for a top-level chat. */
   readonly workspace: WorkspaceRecord | undefined;
-  /** Project folders the user can pick. */
-  readonly folders: readonly WorkspaceRecord[];
-  /** Present when top-level chats are available; × switches to it. */
-  readonly chatsWorkspaceId: string | undefined;
+  /** Project folders the user can pick, plus Chats (no folder), which × switches to. */
+  readonly destinations: readonly WorkspaceRecord[];
   readonly runtime?: RuntimeSnapshot;
   readonly environment: NewThreadEnvironment;
   readonly prompt: string;
@@ -85,8 +83,7 @@ interface NewThreadViewProps {
 
 export function NewThreadView({
   workspace,
-  folders,
-  chatsWorkspaceId,
+  destinations,
   runtime,
   environment,
   prompt,
@@ -131,6 +128,8 @@ export function NewThreadView({
 }: NewThreadViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isChat = workspace?.kind === "chats";
+  const folders = destinations.filter((entry) => entry.kind !== "chats");
+  const chatsWorkspaceId = destinations.find((entry) => entry.kind === "chats")?.id;
 
   useEffect(() => {
     composerRef.current?.focus();

@@ -216,6 +216,16 @@ export interface ForkSessionOptions {
   readonly extensionFlagValues?: ExtensionFlagValues;
 }
 
+/**
+ * Moves an idle thread to another folder. The history is copied there with the same session
+ * id, and the original file is kept beside itself as `<file>.moved` instead of being deleted.
+ */
+export interface MoveSessionOptions {
+  readonly targetWorkspace: WorkspaceRef;
+  /** Flag values for the moved thread's pi session, normally the ones it started with. */
+  readonly extensionFlagValues?: ExtensionFlagValues;
+}
+
 export interface ForkSessionResult {
   readonly snapshot: SessionSnapshot;
   /** When forking "before", the text of the selected user message for composer prefill. */
@@ -476,6 +486,7 @@ export interface SessionDriver {
   createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot>;
   validateForkSession(sourceRef: SessionRef, options: ForkSessionOptions): Promise<void>;
   forkSession(sourceRef: SessionRef, options: ForkSessionOptions): Promise<ForkSessionResult>;
+  moveSession(sourceRef: SessionRef, options: MoveSessionOptions): Promise<SessionSnapshot>;
   openSession(sessionRef: SessionRef): Promise<SessionSnapshot>;
   archiveSession(sessionRef: SessionRef): Promise<void>;
   unarchiveSession(sessionRef: SessionRef): Promise<void>;

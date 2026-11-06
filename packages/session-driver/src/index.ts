@@ -11,6 +11,7 @@ export type {
   ExtensionFlagValues,
   ForkPosition,
   ForkSessionOptions,
+  MoveSessionOptions,
   ForkSessionResult,
   ExtensionCompatibilityIssue,
   ExtensionCompatibilityIssueEvent,
