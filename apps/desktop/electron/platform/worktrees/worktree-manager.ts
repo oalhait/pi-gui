@@ -8,6 +8,14 @@ import type {
   WorktreeCatalogSnapshot,
 } from "@pi-gui/catalogs";
 import type { WorkspaceRef } from "@pi-gui/session-driver";
+import { isRemoteWorkspaceId } from "../../../contracts/remote-hosts";
+
+/** Git runs on this computer, so a remote folder (`pi-remote://`) has no worktrees here. */
+function assertLocal(workspace: WorkspaceRef): void {
+  if (isRemoteWorkspaceId(workspace.workspaceId)) {
+    throw new Error("Worktrees are not available in remote folders yet.");
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +78,7 @@ export class GitWorktreeManager {
     workspace: WorkspaceRef,
     options: { readonly claimPath?: string } = {},
   ): Promise<WorktreeCatalogSnapshot> {
+    assertLocal(workspace);
     const run = this.refreshQueue.then(() => this.refreshWorktreesNow(workspace, options));
     this.refreshQueue = run.catch(() => undefined);
     return run;
@@ -143,6 +152,7 @@ export class GitWorktreeManager {
   }
 
   async inspectWorkspace(workspace: WorkspaceRef): Promise<GitWorkspaceInspection> {
+    assertLocal(workspace);
     return inspectGitWorkspace(workspace.path);
   }
 
@@ -150,6 +160,7 @@ export class GitWorktreeManager {
     workspace: WorkspaceRef,
     input: CreateWorktreeOptions,
   ): Promise<WorktreeCatalogEntry> {
+    assertLocal(workspace);
     const repoRoot = await resolveRepositoryRoot(workspace.path);
     const normalizedPath = input.path.trim();
     if (!normalizedPath) {

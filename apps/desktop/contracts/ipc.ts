@@ -1,4 +1,5 @@
 import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "./workbench-agent";
+import type { RemoteHostConfig, RemoteHostState, RemoteHostTestResult } from "./remote-hosts";
 import type {
   BrowserAction,
   BrowserLayout,
@@ -267,6 +268,13 @@ export const desktopIpc = {
   ping: "app:ping",
   openExternal: "app:open-external",
   relaunchApplication: "pi-gui:relaunch-application",
+  listRemoteHosts: "pi-gui:list-remote-hosts",
+  saveRemoteHost: "pi-gui:save-remote-host",
+  removeRemoteHost: "pi-gui:remove-remote-host",
+  testRemoteHost: "pi-gui:test-remote-host",
+  reconnectRemoteHost: "pi-gui:reconnect-remote-host",
+  restartRemoteHost: "pi-gui:restart-remote-host",
+  remoteHostsChanged: "pi-gui:remote-hosts-changed",
 } as const;
 
 export const desktopCommands = {
@@ -995,4 +1003,14 @@ export interface PiDesktopApi {
   /** The window came back to the foreground, so outside changes (edits, git) may need rereading. */
   onWindowFocused(listener: () => void): () => void;
   relaunchApplication(): Promise<void>;
+  listRemoteHosts(): Promise<readonly RemoteHostState[]>;
+  /** Adds a host, or replaces the one with the same id, and connects to it. */
+  saveRemoteHost(config: RemoteHostConfig): Promise<readonly RemoteHostState[]>;
+  /** Forgets a host here. Its server, chats and files stay on the server. */
+  removeRemoteHost(hostId: string): Promise<readonly RemoteHostState[]>;
+  testRemoteHost(config: RemoteHostConfig): Promise<RemoteHostTestResult>;
+  reconnectRemoteHost(hostId: string): Promise<void>;
+  /** Restarts the host's server, interrupting chats running there. */
+  restartRemoteHost(hostId: string): Promise<void>;
+  onRemoteHostsChanged(listener: (hosts: readonly RemoteHostState[]) => void): () => void;
 }

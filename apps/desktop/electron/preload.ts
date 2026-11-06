@@ -1,5 +1,10 @@
 import type { WorkbenchAgentRequest, WorkbenchAgentResponse } from "../contracts/workbench-agent";
 import type {
+  RemoteHostConfig,
+  RemoteHostState,
+  RemoteHostTestResult,
+} from "../contracts/remote-hosts";
+import type {
   BrowserAction,
   BrowserLayout,
   BrowserMount,
@@ -681,4 +686,24 @@ contextBridge.exposeInMainWorld("piApp", {
     };
   },
   relaunchApplication: () => ipcRenderer.invoke(desktopIpc.relaunchApplication) as Promise<void>,
+  listRemoteHosts: () =>
+    ipcRenderer.invoke(desktopIpc.listRemoteHosts) as Promise<readonly RemoteHostState[]>,
+  saveRemoteHost: (config: RemoteHostConfig) =>
+    ipcRenderer.invoke(desktopIpc.saveRemoteHost, config) as Promise<readonly RemoteHostState[]>,
+  removeRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.removeRemoteHost, hostId) as Promise<readonly RemoteHostState[]>,
+  testRemoteHost: (config: RemoteHostConfig) =>
+    ipcRenderer.invoke(desktopIpc.testRemoteHost, config) as Promise<RemoteHostTestResult>,
+  reconnectRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.reconnectRemoteHost, hostId) as Promise<void>,
+  restartRemoteHost: (hostId: string) =>
+    ipcRenderer.invoke(desktopIpc.restartRemoteHost, hostId) as Promise<void>,
+  onRemoteHostsChanged: (listener: (hosts: readonly RemoteHostState[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, hosts: readonly RemoteHostState[]) =>
+      listener(hosts);
+    ipcRenderer.on(desktopIpc.remoteHostsChanged, handler);
+    return () => {
+      ipcRenderer.removeListener(desktopIpc.remoteHostsChanged, handler);
+    };
+  },
 } satisfies PiDesktopApi);

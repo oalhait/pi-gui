@@ -166,6 +166,12 @@ import {
   isSessionActivelyViewed,
   isSessionVisibleInWindow,
 } from "../conversation/session-visibility";
+import { isRemoteWorkspaceId, remoteHostIdOf } from "../../contracts/remote-hosts";
+import {
+  RoutingDriver,
+  type DesktopDriver,
+  type RemoteDriverLookup,
+} from "../remote/routing-driver";
 
 type StateListener = (state: DesktopAppState) => void;
 type SelectedTranscriptListener = (payload: SelectedTranscriptRecord | null) => void;
@@ -197,7 +203,11 @@ export interface DesktopAppStoreOptions {
     workspace: WorkspaceRef,
     options: GenerateThreadTitleOptions,
   ) => Promise<string | null | undefined>;
+  /** Remote hosts whose `pi-remote://` folders the store routes to their servers. */
+  readonly remoteHosts?: RemoteDriverLookup;
 }
+
+const NO_REMOTE_HOSTS: RemoteDriverLookup = { driverFor: () => undefined, drivers: () => [] };
 
 export class DesktopAppStore {
   private state = createEmptyDesktopAppState();
@@ -253,7 +263,7 @@ export class DesktopAppStore {
   /** Cached session schema info (version-skew flag) projected onto the transcript payload. */
   private readonly sessionSchemaInfoCache = new Map<string, SessionSchemaInfo>();
   private readonly sessionSchemaInfoInFlight = new Set<string>();
-  private readonly driver: PiSdkDriver;
+  private readonly driver: DesktopDriver;
   private readonly catalogStore: JsonCatalogStore;
   private readonly worktreeManager: GitWorktreeManager;
   private readonly worktreeRoot: string;
@@ -313,7 +323,10 @@ export class DesktopAppStore {
         : {}),
     };
 
-    this.driver = new PiSdkDriver(driverOptions);
+    this.driver = new RoutingDriver(
+      new PiSdkDriver(driverOptions),
+      options.remoteHosts ?? NO_REMOTE_HOSTS,
+    );
     this.worktreeRoot = join(options.userDataDir, "worktrees");
     this.isAppWorktreePath = appWorktreeRootMatcher(this.worktreeRoot);
     this.worktreeManager = new GitWorktreeManager({
@@ -667,6 +680,35 @@ export class DesktopAppStore {
   /** Serves a tool-output image the window shows, by the URL its transcript row carries. */
   transcriptImageResponse(requestUrl: string): Response {
     return transcriptImageResponse(requestUrl, (key) => this.sessionState.transcriptCache.get(key));
+  }
+
+  /** A remote host's folders or threads may have changed: relist them. */
+  async refreshRemoteCatalog(): Promise<void> {
+    await this.initialize();
+    await this.refreshState({ refreshWorktrees: false });
+  }
+
+  /**
+   * A remote host reconnected. Events sent while it was away were missed, so transcripts of its
+   * threads are reloaded: the selected one now, the others when next opened.
+   */
+  async resyncRemoteHost(hostId: string): Promise<void> {
+    await this.initialize();
+    for (const key of [...this.sessionState.loadedTranscriptKeys]) {
+      if (remoteHostIdOf(key) === hostId) {
+        this.sessionState.loadedTranscriptKeys.delete(key);
+      }
+    }
+    const selected = this.selectedSessionRef();
+    if (selected && remoteHostIdOf(selected.workspaceId) === hostId) {
+      await this.reloadTranscriptFromDriver(selected).catch((error: unknown) =>
+        console.warn(
+          `[app-store] could not reload ${sessionKey(selected)} after reconnecting`,
+          error,
+        ),
+      );
+    }
+    await this.refreshState({ refreshWorktrees: false });
   }
 
   async getStateForView(view: DesktopAppViewState): Promise<DesktopAppState> {
@@ -3004,11 +3046,21 @@ export class DesktopAppStore {
       return;
     }
 
-    const snapshot = await this.driver.runtimeSupervisor.getRuntimeSnapshot({
-      workspaceId: ws.workspaceId,
-      path: ws.path,
-      displayName: ws.displayName,
-    });
+    let snapshot: RuntimeSnapshot;
+    try {
+      snapshot = await this.driver.runtimeSupervisor.getRuntimeSnapshot({
+        workspaceId: ws.workspaceId,
+        path: ws.path,
+        displayName: ws.displayName,
+      });
+    } catch (error) {
+      // An offline remote host leaves its folder without a runtime until it reconnects.
+      if (isRemoteWorkspaceId(workspaceId)) {
+        console.warn(`[app-store] runtime unavailable for ${workspaceId}`, error);
+        return;
+      }
+      throw error;
+    }
     this.runtimeByWorkspace.set(workspaceId, snapshot);
     // Seed the settings-file baseline so an external edit made before the first
     // focus is still detected as changed rather than swallowed by that first check.
@@ -3723,10 +3775,12 @@ export class DesktopAppStore {
     workspaces: readonly { workspaceId: string; path: string; displayName: string }[],
     preferredWorkspaceId?: string,
   ): Promise<ModelSettingsSnapshot> {
+    // App-wide settings are this computer's; a remote folder reports its server's.
+    const localWorkspaces = workspaces.filter((entry) => !isRemoteWorkspaceId(entry.workspaceId));
     const fallbackWorkspace =
       (preferredWorkspaceId
-        ? workspaces.find((entry) => entry.workspaceId === preferredWorkspaceId)
-        : undefined) ?? workspaces[0];
+        ? localWorkspaces.find((entry) => entry.workspaceId === preferredWorkspaceId)
+        : undefined) ?? localWorkspaces[0];
     if (!fallbackWorkspace) {
       return this.state.globalModelSettings;
     }
