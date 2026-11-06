@@ -2785,6 +2785,7 @@
 
 /* Dialog backdrops stay above the narrow-window sidebar drawer (z-index 40). */
 .extension-dialog-backdrop {
+  -webkit-app-region: no-drag;
   position: fixed;
   inset: var(--window-titlebar-height) 0 0;
   z-index: 42;
@@ -2895,6 +2896,7 @@
 }
 
 .tree-modal-backdrop {
+  -webkit-app-region: no-drag;
   position: fixed;
   inset: var(--window-titlebar-height) 0 0;
   z-index: 43;
