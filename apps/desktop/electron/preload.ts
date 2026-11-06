@@ -31,6 +31,7 @@ import {
   type ChangedFilesResult,
   type DesktopNotificationPermissionStatus,
   type WorkspaceFilePreview,
+  type WorkspaceFileChange,
   type PiDesktopCommand,
   type PiDesktopStateListener,
   type PiDesktopStatePush,
@@ -649,6 +650,13 @@ contextBridge.exposeInMainWorld("piApp", {
       workspaceId,
       filePath,
     }) as Promise<WorkspaceImageResult>,
+  watchWorkspaceFiles: (workspaceId: string, paths: readonly string[]) =>
+    ipcRenderer.invoke(desktopIpc.watchWorkspaceFiles, {
+      workspaceId,
+      paths: [...paths],
+    }) as Promise<void>,
+  onWorkspaceFileChanged: (listener: (change: WorkspaceFileChange) => void) =>
+    subscribeIpc(desktopIpc.workspaceFileChanged, listener),
   revealWorkspaceFile: (workspaceId: string, filePath: string) =>
     ipcRenderer.invoke(desktopIpc.revealWorkspaceFile, workspaceId, filePath) as Promise<void>,
   getChangedFiles: (workspaceId: string) =>

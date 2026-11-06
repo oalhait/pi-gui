@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, WebContents } from "electron";
 import type { SessionRef } from "@pi-gui/session-driver";
 import type {
   AgentToolResult,
@@ -32,6 +32,29 @@ interface Pending {
   }) => void;
   readonly reject: (error: Error) => void;
 }
+const rendering = new WeakMap<WebContents, number>();
+/**
+ * Keeps a window's page painting while a capture of it is in progress. A throttled window in the
+ * background or behind others produces no frames, so a capture would show the last frame it drew,
+ * such as a previously selected tab, or wait for one forever. Returns the release.
+ */
+function keepRendering(contents: WebContents): () => void {
+  const count = rendering.get(contents) ?? 0;
+  if (count === 0 && !contents.getBackgroundThrottling()) return () => {};
+  rendering.set(contents, count + 1);
+  // Also shows a page Chromium had hidden, so the renderer paints and its frames fire.
+  if (count === 0) contents.setBackgroundThrottling(false);
+  return () => {
+    const remaining = (rendering.get(contents) ?? 1) - 1;
+    if (remaining > 0) {
+      rendering.set(contents, remaining);
+      return;
+    }
+    rendering.delete(contents);
+    if (!contents.isDestroyed()) contents.setBackgroundThrottling(true);
+  };
+}
+
 export class WorkbenchAgentOwner {
   private readonly pending = new Map<string, Pending>();
   constructor(
@@ -60,6 +83,19 @@ export class WorkbenchAgentOwner {
         "Open this chat in pi-gui before changing its side pane. Another chat's pane was not changed.",
       );
     if (signal?.aborted) throw new Error("Workbench action cancelled.");
+    const release = command.action === "capture" ? keepRendering(window.webContents) : () => {};
+    try {
+      return await this.run(window, target, command, signal);
+    } finally {
+      release();
+    }
+  }
+  private async run(
+    window: BrowserWindow,
+    target: SessionRef,
+    command: WorkbenchAgentCommand,
+    signal?: AbortSignal,
+  ): Promise<WorkbenchAgentResult> {
     const id = randomUUID();
     let cancel = () => {};
     let timer: ReturnType<typeof setTimeout> | undefined;

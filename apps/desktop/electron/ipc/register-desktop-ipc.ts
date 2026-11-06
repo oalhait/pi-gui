@@ -2,6 +2,7 @@ import { registerBrowserRequests } from "./browser-requests";
 import { ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import type { SessionRef } from "@pi-gui/session-driver";
+import { MAX_WORKBENCH_FILE_TABS } from "../../contracts/workbench";
 import type {
   ComposerAttachment,
   DesktopAppState,
@@ -221,6 +222,12 @@ export interface DesktopIpcCapabilities {
     workspacePath: string,
     filePath: string,
   ) => Promise<unknown>;
+  readonly watchWorkspaceFiles: (
+    window: BrowserWindow,
+    workspaceId: string,
+    workspacePath: string,
+    paths: readonly string[],
+  ) => Promise<void>;
   readonly revealWorkspaceFile: (workspacePath: string, filePath: string) => Promise<void>;
   readonly getChangedFiles: (workspacePath: string) => Promise<ChangedFilesResult>;
   readonly getFileDiff: (workspacePath: string, filePath: string) => Promise<string>;
@@ -1015,6 +1022,23 @@ export function registerDesktopIpc({
       const workspacePath = owners.workspace.getWorkspacePath(workspaceId);
       if (!workspacePath) throw new Error(`Unknown workspace: ${workspaceId}`);
       return capabilities.openWorkspaceImage(request.window, workspacePath, filePath);
+    },
+  );
+  handleMainFrame(
+    desktopIpc.watchWorkspaceFiles,
+    (raw) => {
+      const input = expectRecord(raw, "watch");
+      if (!Array.isArray(input.paths) || input.paths.length > MAX_WORKBENCH_FILE_TABS)
+        throw new Error("paths must be an array of open file tabs");
+      return {
+        workspaceId: expectNonEmptyString(input.workspaceId, "workspaceId"),
+        paths: input.paths.map((entry) => expectNonEmptyString(entry, "path")),
+      };
+    },
+    async ({ workspaceId, paths }, request) => {
+      const workspacePath = owners.workspace.getWorkspacePath(workspaceId);
+      if (!workspacePath) throw new Error(`Unknown workspace: ${workspaceId}`);
+      await capabilities.watchWorkspaceFiles(request.window, workspaceId, workspacePath, paths);
     },
   );
   ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {

@@ -110,6 +110,43 @@ export function useWorkbenchAgent(
         });
       }
     };
+    /** Waits on rendered DOM state, which the workbench hook's own updates don't announce. */
+    const waitForDom = async (
+      request: WorkbenchAgentRequest,
+      predicate: () => boolean,
+      timeoutMs = 10_000,
+    ) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        checkTarget(request);
+        if (predicate()) return true;
+        if (Date.now() >= deadline) return false;
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
+    };
+    /**
+     * Resolves after the browser has produced a frame with the current DOM, so a capture of the
+     * window shows the newly selected tab rather than the last composited frame. A hidden window
+     * may not produce frames; the timeout keeps that from blocking.
+     */
+    const nextPaint = () =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 500);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            clearTimeout(timer);
+            resolve();
+          }),
+        );
+      });
+    /** The selected pane tab has finished loading what it shows, as far as the DOM tells. */
+    const paneSettled = () => {
+      const pane = document.querySelector('[data-testid="workbench"]');
+      if (!pane) return true;
+      return !pane.querySelector(
+        '[data-testid="file-editor"][data-state="loading"], [data-testid="file-image"][data-state="loading"]',
+      );
+    };
     const state = (): WorkbenchAgentState => {
       const value = current.current.workbench;
       return {
@@ -192,6 +229,19 @@ export function useWorkbenchAgent(
             command.tab_id ??
             (value.view.selection.kind === "tool" ? value.view.selection.toolId : undefined);
           if (!id) throw new Error("No side pane tab is selected. Use list to choose a tab_id.");
+          const selectedPane =
+            command.action === "capture" &&
+            value.view.visibility === "visible" &&
+            value.view.selection.kind === "tool" &&
+            value.view.selection.toolId === id &&
+            !id.startsWith("browser");
+          if (selectedPane) {
+            // Capture what the user sees once the tab has rendered, never a frame from the
+            // previously selected tab.
+            await waitForDom(request, paneSettled, 5_000);
+            await nextPaint();
+            checkTarget(request);
+          }
           const target = captureTarget(id);
           if (command.action === "read" && target.kind !== "browser")
             throw new Error(
@@ -265,6 +315,7 @@ export function useWorkbenchAgent(
               );
             }
           } else if (command.tool === "files" && command.path) {
+            const opens = value.fileRefresh;
             await value.openFile(
               { workspaceId: request.target.workspaceId, path: command.path },
               () => checkTarget(request),
@@ -275,8 +326,21 @@ export function useWorkbenchAgent(
               (next) =>
                 next.view.visibility === "visible" &&
                 next.view.selection.kind === "tool" &&
-                next.view.selection.toolId === id,
+                next.view.selection.toolId === id &&
+                next.fileRefresh > opens,
             );
+            // Opening an already open file re-reads it; answer once the tab shows that read.
+            const refresh = current.current.workbench.fileRefresh;
+            await waitForDom(request, () => {
+              const editor = [
+                ...document.querySelectorAll<HTMLElement>('[data-testid="file-editor"]'),
+              ].find((element) => element.dataset.path === command.path);
+              return Boolean(
+                editor &&
+                editor.dataset.state !== "loading" &&
+                Number(editor.dataset.refresh) >= refresh,
+              );
+            });
             break;
           } else if (command.tool === "terminal") {
             // The most recently used terminal, or a first one; new=true always adds a tab.
