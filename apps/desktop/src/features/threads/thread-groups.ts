@@ -1,9 +1,10 @@
-import type {
-  ChildThreadLink,
-  DesktopAppState,
-  SessionRecord,
-  ThreadGrouping,
-  WorkspaceRecord,
+import {
+  NO_THREAD_PARENT,
+  type ChildThreadLink,
+  type DesktopAppState,
+  type SessionRecord,
+  type ThreadGrouping,
+  type WorkspaceRecord,
 } from "../../../contracts/desktop-state";
 import {
   compareByRecency,
@@ -75,7 +76,11 @@ export function buildThreadSidebarModel(
   state: DesktopAppState,
   nowMs: number = Date.now(),
 ): ThreadSidebarModel {
-  const entries = nestThreads(collectThreadEntries(state), state.childThreadLinks);
+  const entries = nestThreads(
+    collectThreadEntries(state),
+    state.childThreadLinks,
+    state.threadParentOverrides,
+  );
   const pinnedThreads = entries
     .filter((entry) => !entry.session.archivedAt && Boolean(entry.session.pinnedAt))
     .sort((left, right) => comparePinnedThreads(left, right, state.pinnedSessionOrder));
@@ -122,19 +127,33 @@ export function buildThreadSidebarModel(
 }
 
 /**
- * Nests each child thread under its parent's row. A child stays a top-level row when
+ * Nests each child thread under its parent's row: the parent the user chose by dragging,
+ * else the agent's link. A child stays a top-level row when
  * it is pinned or archived, its parent is archived or missing, or the saved
  * links form a cycle, so every thread stays reachable. View-only: no transcript reads.
  */
 function nestThreads(
   entries: readonly ThreadListEntry[],
   links: readonly ChildThreadLink[],
+  overrides: Readonly<Record<string, string>> = {},
 ): ThreadListEntry[] {
   const byKey = new Map(entries.map((entry) => [sessionThreadKey(entry), entry]));
   const parentOf = new Map<string, string>();
-  for (const link of links) {
-    const key = `${link.childWorkspaceId}:${link.childSessionId}`;
-    const parentKey = `${link.parentWorkspaceId}:${link.parentSessionId}`;
+  const candidates = [
+    ...Object.entries(overrides),
+    ...links.map(
+      (link) =>
+        [
+          `${link.childWorkspaceId}:${link.childSessionId}`,
+          `${link.parentWorkspaceId}:${link.parentSessionId}`,
+        ] as const,
+    ),
+  ];
+  for (const [key, parentKey] of candidates) {
+    // The user's choice, which may be "no parent", replaces the agent's link.
+    if (parentKey === NO_THREAD_PARENT || (key in overrides && overrides[key] !== parentKey)) {
+      continue;
+    }
     const child = byKey.get(key);
     const parent = byKey.get(parentKey);
     if (!child || !parent || key === parentKey || parentOf.has(key)) continue;

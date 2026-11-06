@@ -33,6 +33,7 @@ function handlers(
     setPinned: (_subject, pinned) => calls.push(`pin:${pinned}`),
     archive: record("archive"),
     startMove: record("move"),
+    unnest: record("unnest"),
     restore: record("restore"),
     markRead: record("mark-read"),
     markUnread: record("mark-unread"),
@@ -116,4 +117,16 @@ test("only a thread with no run going offers Move to…", () => {
     recorder,
   );
   expect(running.some((action) => action.id === "move-thread")).toBe(false);
+});
+
+test("a nested thread offers Move out of parent", () => {
+  const recorder = handlers("darwin");
+  const top = buildThreadActions({ workspaceId: "ws", session: session() }, recorder);
+  expect(top.some((action) => action.id === "unnest-thread")).toBe(false);
+  const nested = buildThreadActions(
+    { workspaceId: "ws", session: session(), parentKey: "ws:parent" },
+    recorder,
+  );
+  nested.find((action) => action.id === "unnest-thread")?.run();
+  expect(recorder.calls).toEqual(["unnest"]);
 });

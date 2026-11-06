@@ -59,6 +59,8 @@ export interface PersistedUiState {
   readonly themeMode?: ThemeMode;
   readonly themePresetId?: ThemePresetId;
   readonly orchestrationChildren?: readonly OrchestrationChildThread[];
+  /** Parents chosen by dragging, by child session key; "none" keeps a thread at the top level. */
+  readonly threadParentOverrides?: Record<string, string>;
 }
 
 export interface LegacyPersistedUiState extends PersistedUiState {
@@ -137,6 +139,7 @@ export function decodePersistedUiState(parsed: unknown): LegacyPersistedUiState 
     themeMode: toThemeMode(candidate.themeMode),
     themePresetId: toThemePresetId(candidate.themePresetId),
     orchestrationChildren: toPersistedOrchestrationChildren(candidate.orchestrationChildren),
+    threadParentOverrides: toStringRecord(candidate.threadParentOverrides),
     composerAttachmentsBySession: toObjectArrayRecord(candidate.composerAttachmentsBySession),
     transcripts: toObjectArrayRecord(candidate.transcripts),
   };
@@ -231,6 +234,7 @@ function validateUiState(value: unknown): Record<string, unknown> {
       "themeMode",
       "themePresetId",
       "orchestrationChildren",
+      "threadParentOverrides",
       "composerAttachmentsBySession",
       "transcripts",
     ],
@@ -270,6 +274,7 @@ function validateUiState(value: unknown): Record<string, unknown> {
     "lastViewedAtBySession",
     "lastInteractedAtBySession",
     "pinnedAtBySession",
+    "threadParentOverrides",
   ])
     optional(root, key, stringRecord);
   for (const key of [

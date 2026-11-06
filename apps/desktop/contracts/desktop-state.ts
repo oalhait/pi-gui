@@ -467,6 +467,16 @@ export type ForkThreadInput = {
   readonly position?: ForkThreadPosition;
 };
 
+/** A threadParentOverrides value: the user moved the thread out of its parent. */
+export const NO_THREAD_PARENT = "none";
+
+/** Nests a thread under another one, or with no parent puts it back at the top level. */
+export interface SetThreadParentInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly parent?: WorkspaceSessionTarget;
+}
+
 /** Moves an idle thread to another project folder, or out of any folder (the Chats workspace). */
 export interface MoveThreadInput {
   readonly workspaceId: string;
@@ -515,6 +525,12 @@ export interface DesktopAppState {
    */
   readonly orchestrationChildren: readonly OrchestrationChildThread[];
   readonly childThreadLinks: readonly ChildThreadLink[];
+  /**
+   * Parents the user chose by dragging, by child session key: a parent's session key, or
+   * NO_THREAD_PARENT to keep the thread at the top level even when an agent started it.
+   * These win over childThreadLinks when the sidebar nests threads.
+   */
+  readonly threadParentOverrides: Readonly<Record<string, string>>;
   readonly scheduledTasks: readonly ScheduledTaskRecord[];
   readonly notificationPreferences: NotificationPreferences;
   readonly integratedTerminalShell: string;
@@ -568,6 +584,7 @@ export function createEmptyDesktopAppState(): DesktopAppState {
     extensionFlagsBySession: {},
     orchestrationChildren: [],
     childThreadLinks: [],
+    threadParentOverrides: {},
     scheduledTasks: [],
     notificationPreferences: {
       backgroundCompletion: true,

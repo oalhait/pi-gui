@@ -651,6 +651,34 @@
   box-shadow: var(--shadow-md);
 }
 
+.session-list--history .session-row--dragging {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+.thread-drag-pill {
+  display: inline-block;
+  max-width: 220px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text-strong);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* A thread dragged over this row would nest under it. */
+.session-row--drop-target {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: var(--surface-muted);
+}
+
 .session-row--overlay {
   min-width: 260px;
   background: var(--surface);

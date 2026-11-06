@@ -53,6 +53,8 @@ import {
   type DesktopAppViewState,
   type ForkThreadInput,
   type MoveThreadInput,
+  NO_THREAD_PARENT,
+  type SetThreadParentInput,
   type NotificationPreferences,
   type OrchestrationChildThread,
   type QueuedComposerMessage,
@@ -1248,13 +1250,81 @@ export class DesktopAppStore {
       tasksChanged = true;
       return { ...task, target: { ...task.target, workspaceId: to.workspaceId } };
     });
+    const rekey = (key: string) => (key === fromKey ? toKey : key);
+    const threadParentOverrides = Object.fromEntries(
+      Object.entries(this.state.threadParentOverrides).map(([child, parent]) => [
+        rekey(child),
+        rekey(parent),
+      ]),
+    );
     this.state = {
       ...this.state,
       ...this.orchestrationChildrenState(children),
       scheduledTasks,
+      threadParentOverrides,
     };
     await this.persistUiState();
     if (tasksChanged) await this.persistScheduledTasks();
+  }
+
+  /** Nests a thread under another (drag in the sidebar), or puts it back at the top level. */
+  async setThreadParent(input: SetThreadParentInput): Promise<DesktopAppState> {
+    await this.initialize();
+    const child = toSessionRef(input);
+    if (!this.sessionFromState(child)) {
+      return this.withError(`Unknown session: ${input.workspaceId}:${input.sessionId}`);
+    }
+    const childKey = sessionKey(child);
+    const parentOf = this.effectiveThreadParents();
+    let parentKey = NO_THREAD_PARENT;
+    if (input.parent) {
+      const parent = toSessionRef(input.parent);
+      if (!this.sessionFromState(parent)) {
+        return this.withError(`Unknown session: ${parent.workspaceId}:${parent.sessionId}`);
+      }
+      parentKey = sessionKey(parent);
+      const seen = new Set<string>();
+      for (let cursor: string | undefined = parentKey; cursor; cursor = parentOf.get(cursor)) {
+        if (cursor === childKey) {
+          return this.withError("A thread can't go inside itself or one of its own children.");
+        }
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+      }
+    }
+    const threadParentOverrides = { ...this.state.threadParentOverrides };
+    const agentLinked = this.state.childThreadLinks.some(
+      (link) =>
+        sessionKey({ workspaceId: link.childWorkspaceId, sessionId: link.childSessionId }) ===
+        childKey,
+    );
+    // Back at the top level with no agent link to override, the entry has nothing to say.
+    if (parentKey === NO_THREAD_PARENT && !agentLinked) delete threadParentOverrides[childKey];
+    else threadParentOverrides[childKey] = parentKey;
+    this.state = {
+      ...this.state,
+      threadParentOverrides,
+      lastError: undefined,
+      revision: this.state.revision + 1,
+    };
+    await this.persistUiState();
+    return this.emit();
+  }
+
+  /** Each child's parent as the sidebar nests it: agent links, then the user's overrides. */
+  private effectiveThreadParents(): Map<string, string> {
+    const parentOf = new Map<string, string>();
+    for (const link of this.state.childThreadLinks) {
+      parentOf.set(
+        sessionKey({ workspaceId: link.childWorkspaceId, sessionId: link.childSessionId }),
+        sessionKey({ workspaceId: link.parentWorkspaceId, sessionId: link.parentSessionId }),
+      );
+    }
+    for (const [child, parent] of Object.entries(this.state.threadParentOverrides)) {
+      if (parent === NO_THREAD_PARENT) parentOf.delete(child);
+      else parentOf.set(child, parent);
+    }
+    return parentOf;
   }
 
   async forkThread(input: ForkThreadInput): Promise<DesktopAppState> {
@@ -2481,6 +2551,7 @@ export class DesktopAppStore {
       lastInteractedAtBySession: persisted.lastInteractedAtBySession ?? {},
       pinnedAtBySession: persisted.pinnedAtBySession ?? {},
       pinnedSessionOrder: persisted.pinnedSessionOrder ?? [],
+      threadParentOverrides: persisted.threadParentOverrides ?? {},
       workspaceOrder: persisted.workspaceOrder ?? [],
       themeMode: persisted.themeMode ?? this.state.themeMode,
       themePresetId: persisted.themePresetId ?? this.state.themePresetId,
@@ -2885,6 +2956,15 @@ export class DesktopAppStore {
         this.taskWorkbenchTemplatesBySession.delete(key);
         changed = true;
       }
+    }
+    const overrides = Object.entries(this.state.threadParentOverrides);
+    const liveOverrides = overrides.filter(
+      ([child, parent]) =>
+        activeKeys.has(child) && (parent === NO_THREAD_PARENT || activeKeys.has(parent)),
+    );
+    if (liveOverrides.length !== overrides.length) {
+      this.state = { ...this.state, threadParentOverrides: Object.fromEntries(liveOverrides) };
+      changed = true;
     }
     if (changed) {
       this.schedulePersistUiState();
@@ -4356,6 +4436,10 @@ export class DesktopAppStore {
           ? this.sessionState.pinnedSessionOrder
           : undefined,
       workspaceOrder: this.state.workspaceOrder.length > 0 ? this.state.workspaceOrder : undefined,
+      threadParentOverrides:
+        Object.keys(this.state.threadParentOverrides).length > 0
+          ? this.state.threadParentOverrides
+          : undefined,
       modelSettingsScopeMode: this.state.modelSettingsScopeMode,
       appGlobalModelSettings: hasStoredModelSettings(this.state.globalModelSettings)
         ? this.state.globalModelSettings

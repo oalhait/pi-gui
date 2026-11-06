@@ -604,3 +604,54 @@ test("an empty Chats workspace adds no rows", () => {
   expect(model.folders).toEqual([]);
   expect(model.recencyOrder).toEqual([]);
 });
+
+test("a parent chosen by dragging nests a thread, even across folders, and wins over an agent link", () => {
+  const alpha = workspace("alpha", "Alpha", [
+    session("parent", "Parent", { updatedAt: isoDaysAgo(0, 9) }),
+    session("agent-child", "Agent child", { updatedAt: isoDaysAgo(0, 8) }),
+  ]);
+  const chats = workspace(
+    "chats",
+    "Chats",
+    [session("loose", "Loose chat", { updatedAt: isoDaysAgo(0, 7) })],
+    { kind: "chats" },
+  );
+  const agentLink: ChildThreadLink = {
+    id: "link",
+    parentWorkspaceId: "alpha",
+    parentSessionId: "parent",
+    childWorkspaceId: "alpha",
+    childSessionId: "agent-child",
+    title: "Agent child",
+    status: "complete",
+  };
+  const model = buildThreadSidebarModel(
+    state([alpha, chats], {
+      childThreadLinks: [agentLink],
+      threadParentOverrides: { "chats:loose": "alpha:parent", "alpha:agent-child": "none" },
+    }),
+    nowMs,
+  );
+  const parent = model.recencyOrder.find((thread) => thread.session.id === "parent");
+  expect(parent?.children?.map((child) => child.session.id)).toEqual(["loose"]);
+  expect(model.topLevelThreads).toEqual([]);
+  const agentChild = model.recencyOrder.find((thread) => thread.session.id === "agent-child");
+  expect(agentChild?.parentKey).toBeUndefined();
+});
+
+test("a pinned thread stays a top-level row whatever parent it was given", () => {
+  const model = buildThreadSidebarModel(
+    state(
+      [
+        workspace("alpha", "Alpha", [
+          session("parent", "Parent", { updatedAt: isoDaysAgo(0) }),
+          session("pinned", "Pinned", { updatedAt: isoDaysAgo(0), pinnedAt: isoDaysAgo(0) }),
+        ]),
+      ],
+      { threadParentOverrides: { "alpha:pinned": "alpha:parent" } },
+    ),
+    nowMs,
+  );
+  expect(model.pinnedThreads.map((thread) => thread.session.id)).toEqual(["pinned"]);
+  expect(model.recencyOrder.find((t) => t.session.id === "pinned")?.parentKey).toBeUndefined();
+});

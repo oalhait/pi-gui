@@ -15,6 +15,7 @@ import {
   type CreateWorktreeInput,
   type ForkThreadInput,
   type MoveThreadInput,
+  type SetThreadParentInput,
   type ModelSettingsScopeMode,
   type NotificationPreferences,
   type RemoveWorktreeInput,
@@ -277,6 +278,17 @@ export function expectMoveThreadInput(value: unknown): MoveThreadInput {
       record.destinationWorkspaceId,
       "input.destinationWorkspaceId",
     ),
+  };
+}
+
+export function expectSetThreadParentInput(value: unknown): SetThreadParentInput {
+  const record = expectRecord(value, "input");
+  return {
+    workspaceId: expectNonEmptyString(record.workspaceId, "input.workspaceId"),
+    sessionId: expectNonEmptyString(record.sessionId, "input.sessionId"),
+    ...(record.parent === undefined
+      ? {}
+      : { parent: expectSessionTarget(record.parent, "input.parent") }),
   };
 }
 

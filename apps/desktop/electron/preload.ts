@@ -75,6 +75,7 @@ import type {
   DesktopAppState,
   ForkThreadInput,
   MoveThreadInput,
+  SetThreadParentInput,
   NotificationPreferences,
   RemoveWorktreeInput,
   SendChildThreadFollowUpInput,
@@ -330,6 +331,8 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.invoke(desktopIpc.forkThread, input) as Promise<DesktopAppState>,
   moveThread: (input: MoveThreadInput) =>
     ipcRenderer.invoke(desktopIpc.moveThread, input) as Promise<DesktopAppState>,
+  setThreadParent: (input: SetThreadParentInput) =>
+    ipcRenderer.invoke(desktopIpc.setThreadParent, input) as Promise<DesktopAppState>,
   sendChildThreadFollowUp: (input: SendChildThreadFollowUpInput) =>
     ipcRenderer.invoke(desktopIpc.sendChildThreadFollowUp, input) as Promise<DesktopAppState>,
   setChildSupervisionLoop: (input: SetChildSupervisionLoopInput) =>

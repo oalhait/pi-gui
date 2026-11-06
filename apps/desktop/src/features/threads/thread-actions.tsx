@@ -23,6 +23,7 @@ export type ThreadActionId =
   | "pin-thread"
   | "archive-thread"
   | "move-thread"
+  | "unnest-thread"
   | "restore-thread"
   | "mark-read"
   | "mark-unread"
@@ -41,6 +42,8 @@ export interface ThreadAction {
 export interface ThreadActionSubject {
   readonly workspaceId: string;
   readonly session: SessionRecord;
+  /** Set when the sidebar draws this thread nested under another one. */
+  readonly parentKey?: string;
 }
 
 export interface ThreadActionHandlers {
@@ -50,6 +53,7 @@ export interface ThreadActionHandlers {
   readonly setPinned: (subject: ThreadActionSubject, pinned: boolean) => void;
   readonly archive: (subject: ThreadActionSubject) => void;
   readonly startMove: (subject: ThreadActionSubject) => void;
+  readonly unnest: (subject: ThreadActionSubject) => void;
   readonly restore: (subject: ThreadActionSubject) => void;
   readonly markRead: (subject: ThreadActionSubject) => void;
   readonly markUnread: (subject: ThreadActionSubject) => void;
@@ -111,6 +115,14 @@ export function buildThreadActions(
         title: "Move to…",
         icon: <FolderIcon />,
         run: () => handlers.startMove(subject),
+      });
+    }
+    if (subject.parentKey) {
+      actions.push({
+        id: "unnest-thread",
+        title: "Move out of parent",
+        icon: <RestoreIcon />,
+        run: () => handlers.unnest(subject),
       });
     }
   }

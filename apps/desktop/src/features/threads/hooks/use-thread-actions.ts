@@ -143,6 +143,7 @@ export function useThreadActions({
     setPinned: (subject, pinned) => setPinned(targetFor(subject), pinned),
     archive: (subject) => archive(targetFor(subject)),
     startMove: (subject) => setMove({ subject, submitting: false }),
+    unnest: (subject) => mutate((desktopApi) => desktopApi.setThreadParent(targetFor(subject))),
     restore: (subject) => restore(targetFor(subject)),
     markRead: (subject) => mutate((desktopApi) => desktopApi.markSessionRead(targetFor(subject))),
     markUnread: (subject) =>

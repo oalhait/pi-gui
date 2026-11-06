@@ -14,6 +14,8 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -21,6 +23,7 @@ import {
   type DraggableSyntheticListeners,
   type DragEndEvent,
   type DragStartEvent,
+  type Modifier,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -293,10 +296,42 @@ export function Sidebar(props: SidebarProps) {
   const pinnedSortableId = (thread: ThreadListEntry) => `pinned:${sessionThreadKey(thread)}`;
   const pinnedSessionKeyFromSortableId = (id: string) =>
     id.startsWith("pinned:") ? id.slice("pinned:".length) : id;
+  // recencyOrder holds every unarchived thread, nested ones included.
+  const threadByKey = new Map(
+    threadSidebarModel.recencyOrder.map((thread) => [sessionThreadKey(thread), thread] as const),
+  );
+  const threadByDndId = (id: string) =>
+    id.startsWith(THREAD_DND_PREFIX)
+      ? threadByKey.get(id.slice(THREAD_DND_PREFIX.length))
+      : undefined;
+  /** The thread a drop on this row would nest under: history rows, and pinned rows too. */
+  const dropTargetThread = (id: string) =>
+    threadByDndId(id) ??
+    (id.startsWith("pinned:") ? threadByKey.get(pinnedSessionKeyFromSortableId(id)) : undefined);
 
   // Collision detection based on workspace row headers only (~30px top of each group),
   // not the full group height including all sessions.
   const headerCollision: CollisionDetection = (args) => {
+    if (String(args.active.id).startsWith(THREAD_DND_PREFIX)) {
+      // A thread drops onto the row under the pointer, never onto itself or its own children.
+      const pointer = args.pointerCoordinates;
+      const dragged = threadByDndId(String(args.active.id));
+      if (!pointer || !dragged) return [];
+      const excluded = descendantKeys(dragged);
+      excluded.add(sessionThreadKey(dragged));
+      for (const container of args.droppableContainers) {
+        const target = dropTargetThread(String(container.id));
+        const rect = container.rect.current;
+        if (!target || !rect || excluded.has(sessionThreadKey(target))) continue;
+        const inside =
+          pointer.x >= rect.left &&
+          pointer.x <= rect.left + rect.width &&
+          pointer.y >= rect.top &&
+          pointer.y <= rect.top + rect.height;
+        if (inside) return [{ id: container.id, data: { droppableContainer: container } }];
+      }
+      return [];
+    }
     if (String(args.active.id).startsWith("pinned:")) {
       const pointerY = args.pointerCoordinates?.y;
       if (pointerY == null) return [];
@@ -332,7 +367,8 @@ export function Sidebar(props: SidebarProps) {
 
     let closest: { id: string; distance: number } | null = null;
     for (const container of args.droppableContainers) {
-      if (String(container.id).startsWith("pinned:")) {
+      const containerId = String(container.id);
+      if (containerId.startsWith("pinned:") || containerId.startsWith(THREAD_DND_PREFIX)) {
         continue;
       }
       const rect = container.rect.current;
@@ -382,6 +418,22 @@ export function Sidebar(props: SidebarProps) {
     setActiveId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+
+    const dragged = threadByDndId(String(active.id));
+    if (dragged) {
+      const parent = dropTargetThread(String(over.id));
+      if (!parent || dragged.parentKey === sessionThreadKey(parent)) return;
+      void updateSnapshot(setSnapshot, () =>
+        api.setThreadParent({
+          workspaceId: dragged.workspaceId,
+          sessionId: dragged.session.id,
+          parent: { workspaceId: parent.workspaceId, sessionId: parent.session.id },
+        }),
+      ).catch((error: unknown) => {
+        console.error("[renderer] setThreadParent failed", error);
+      });
+      return;
+    }
 
     if (String(active.id).startsWith("pinned:")) {
       const oldIndex = pinnedSortableIds.indexOf(String(active.id));
@@ -433,6 +485,7 @@ export function Sidebar(props: SidebarProps) {
   const activeFolder = activeId
     ? rootGroups.find((group) => group.workspace.id === activeId)?.workspace
     : undefined;
+  const activeThread = activeId ? threadByDndId(activeId) : undefined;
   const activePinnedThread = activeId?.startsWith("pinned:")
     ? pinnedThreads.find((thread) => pinnedSortableId(thread) === activeId)
     : undefined;
@@ -718,8 +771,10 @@ export function Sidebar(props: SidebarProps) {
                   />
                 ) : null}
               </div>
-              <DragOverlay>
-                {activePinnedThread ? (
+              <DragOverlay modifiers={activeThread ? [besidePointer] : undefined}>
+                {activeThread ? (
+                  <div className="thread-drag-pill">{activeThread.session.title}</div>
+                ) : activePinnedThread ? (
                   <ThreadSessionRow
                     active={
                       activePinnedThread.workspaceId === selectedWorkspace?.id &&
@@ -1183,12 +1238,24 @@ function HistoryThreadRow({
 }) {
   const active =
     thread.workspaceId === selectedWorkspace?.id && thread.session.id === selectedSession?.id;
+  // Drag a row onto another to nest it there; every row is also a place to drop one.
+  const dndId = threadDndId(thread);
+  const drag = useDraggable({ id: dndId, data: { thread } });
+  const drop = useDroppable({ id: dndId, data: { thread } });
   return (
     <ThreadSessionRow
+      ref={(node) => {
+        drag.setNodeRef(node);
+        drop.setNodeRef(node);
+      }}
       active={active}
       showContext={showContext}
       thread={thread}
       threadMenu={threadMenu}
+      dragging={drag.isDragging}
+      dropTarget={drop.isOver && !drag.isDragging}
+      dragAttributes={drag.attributes}
+      dragListeners={drag.listeners}
       onAction={() =>
         onArchiveSession({
           workspaceId: thread.workspaceId,
@@ -1635,6 +1702,33 @@ function SortablePinnedThreadRow({
   );
 }
 
+const THREAD_DND_PREFIX = "thread:";
+
+/** Shows a dragged thread's label just below and right of the pointer, clear of the drop row. */
+const besidePointer: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
+  if (!(activatorEvent instanceof PointerEvent) || !draggingNodeRect) return transform;
+  return {
+    ...transform,
+    x: transform.x + activatorEvent.clientX - draggingNodeRect.left + 12,
+    y: transform.y + activatorEvent.clientY - draggingNodeRect.top + 12,
+  };
+};
+
+function threadDndId(thread: ThreadListEntry): string {
+  return `${THREAD_DND_PREFIX}${sessionThreadKey(thread)}`;
+}
+
+/** Every thread nested under this one, at any depth: it cannot become their child. */
+function descendantKeys(thread: ThreadListEntry): Set<string> {
+  const keys = new Set<string>();
+  const pending = [...(thread.children ?? [])];
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    keys.add(sessionThreadKey(next));
+    pending.push(...(next.children ?? []));
+  }
+  return keys;
+}
+
 function sessionIndicatorVariant(
   thread: ThreadListEntry,
 ): "running" | "failed" | "unseen" | "none" {
@@ -1656,6 +1750,8 @@ interface ThreadSessionRowProps {
   readonly showContext?: boolean;
   readonly overlay?: boolean;
   readonly dragging?: boolean;
+  /** Another thread is being dragged over this row and would nest under it. */
+  readonly dropTarget?: boolean;
   readonly style?: CSSProperties;
   readonly dragAttributes?: DraggableAttributes;
   readonly dragListeners?: DraggableSyntheticListeners;
@@ -1674,6 +1770,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
       showContext = false,
       overlay = false,
       dragging = false,
+      dropTarget = false,
       style,
       dragAttributes,
       dragListeners,
@@ -1704,6 +1801,7 @@ const ThreadSessionRow = forwardRef<HTMLDivElement, ThreadSessionRowProps>(
       active ? "session-row--active" : "",
       pinned ? "session-row--pinned" : "",
       dragging ? "session-row--dragging" : "",
+      dropTarget ? "session-row--drop-target" : "",
       overlay ? "session-row--overlay" : "",
       shortcutBadge ? "session-row--shortcut" : "",
     ]

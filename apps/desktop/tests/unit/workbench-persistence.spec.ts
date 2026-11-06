@@ -405,3 +405,17 @@ test("v19 file sub-tabs become top-level tabs after the explorer, keeping select
   expect(saved.version).toBe(20);
   expect(saved.taskWorkbenchTemplatesBySession).toEqual(layouts);
 });
+
+test("thread parents chosen by dragging survive a save, and a malformed entry stops startup", () => {
+  const decoded = decodePersistedUiState({
+    version: 20,
+    threadParentOverrides: { "ws:child": "ws:parent", "ws:loose": "none" },
+  });
+  expect(decoded.threadParentOverrides).toEqual({
+    "ws:child": "ws:parent",
+    "ws:loose": "none",
+  });
+  expect(() =>
+    decodePersistedUiState({ version: 20, threadParentOverrides: { "ws:child": 3 } }),
+  ).toThrow(/threadParentOverrides/);
+});
