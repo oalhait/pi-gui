@@ -102,6 +102,12 @@ import type {
 import type { SessionDriverEvent } from "@pi-gui/session-driver";
 import type { GenerateThreadTitleOptions } from "@pi-gui/pi-sdk-driver";
 import type { SessionRef, WorkspaceRef } from "@pi-gui/session-driver";
+import {
+  recordInterruptedSessions,
+  RESUME_AFTER_RESTART_MESSAGE,
+  takeInterruptedSessions,
+  takeRestartRequest,
+} from "./persistence/restart-resume-store";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -1382,6 +1388,17 @@ app
     void notificationPermissionService.getCurrentStatus().catch((error: unknown) => {
       console.error("[main] getCurrentStatus failed", error);
     });
+    // Threads that `pnpm app:restart` cut off mid-run continue in the new build.
+    const resumingStore = store;
+    // A request left behind (an older build quit without reading it) belongs to that quit.
+    void takeRestartRequest(configuredUserDataDir)
+      .then(() => takeInterruptedSessions(configuredUserDataDir))
+      .then((sessionRefs) =>
+        resumingStore.resumeInterruptedSessions(sessionRefs, RESUME_AFTER_RESTART_MESSAGE),
+      )
+      .catch((error: unknown) => {
+        console.error("[main] continuing threads after the restart failed", error);
+      });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -1440,9 +1457,19 @@ app.on("before-quit", (event) => {
   if (quitFlush === "flushing") return;
   quitFlush = "flushing";
   const quittingStore = store;
+  // A restart for a new build remembers the threads it is about to cut off.
+  const recordRestart = takeRestartRequest(configuredUserDataDir).then((restarting) =>
+    restarting
+      ? recordInterruptedSessions(configuredUserDataDir, quittingStore.runningSessionRefs())
+      : undefined,
+  );
   // Renderers send their debounced drafts first so the store flush below includes them.
-  const flush = composerDraftFlusher
-    .flush(windowOwner.allWindows())
+  const flush = Promise.all([
+    recordRestart.catch((error: unknown) => {
+      console.error("pi-gui: recording threads to continue after the restart failed:", error);
+    }),
+    composerDraftFlusher.flush(windowOwner.allWindows()),
+  ])
     .then(() => Promise.all([quittingStore.flushPersistence(), extensionViewOwner?.dispose()]))
     .catch((error: unknown) => {
       console.error("pi-gui: persistence flush failed during quit:", error);

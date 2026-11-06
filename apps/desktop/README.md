@@ -33,6 +33,14 @@ Run the built app locally without packaging:
 pnpm --filter @pi-gui/desktop preview
 ```
 
+Install this checkout's build over `/Applications/pi-gui.app` and restart into it (macOS):
+
+```bash
+pnpm app:restart
+```
+
+It builds while the installed app keeps running, signs the bundle (the keychain's only code-signing identity, or `PI_GUI_SIGNING_IDENTITY`) and verifies it before swapping it in, so macOS keeps the app's privacy grants. It then quits pi-gui normally, installs, and relaunches. Threads that were running when it quit, including one that ran the command, get a message to continue in the new build. A failed build, typecheck or signature leaves the installed app untouched, and a build that quits right after launch is replaced by the previous one. The previous build is kept at `~/Library/Caches/pi-gui-restart/previous.app` and logs are in `~/Library/Logs/pi-gui-restart/`.
+
 Package a Linux AppImage locally:
 
 ```bash

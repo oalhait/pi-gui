@@ -9,4 +9,5 @@ Apply these rules for changes under `apps/desktop/`.
 - Keep the main pane conversation-first: transcript, tool timeline, composer, and session state are the priority.
 - Don’t expose broad filesystem/process APIs through preload; add only narrow IPC needed by the renderer.
 - Prefer shared helpers over duplicating Electron test harness or IPC glue.
+- When a desktop change is ready for the user's feedback in their installed app (macOS), run `pnpm app:restart` from the checkout instead of asking them to rebuild. It interrupts every running thread, yours included, and continues them in the new build; when you are continued, confirm the new build is running before asking for feedback.
 - Keep composer and timeline behavior fast on hot paths; avoid full-state disk writes for keystrokes if a narrower path works.
