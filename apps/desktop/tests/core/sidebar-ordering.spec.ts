@@ -108,6 +108,10 @@ test("pinned sidebar threads stay above history, persist across relaunch, and un
     await expect(pinnedSection.locator(".session-row__context")).toHaveText([
       basename(workspacePath),
     ]);
+    // Pinned threads lead the sidebar, above every folder and history section.
+    await expect(
+      window.getByTestId("workspace-list").locator(":scope > *").first(),
+    ).toHaveAttribute("aria-label", "Pinned threads");
 
     await expect
       .poll(async () => {

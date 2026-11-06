@@ -584,6 +584,19 @@ export function Sidebar(props: SidebarProps) {
               }}
             >
               <div className="workspace-list" data-testid="workspace-list">
+                {pinnedThreads.length > 0 ? (
+                  <PinnedThreadsSection
+                    pinnedThreads={pinnedThreads}
+                    sortableIds={pinnedSortableIds}
+                    sortableIdForThread={pinnedSortableId}
+                    selectedWorkspace={selectedWorkspace}
+                    selectedSession={selectedSession}
+                    threadMenu={threadMenu}
+                    onArchiveSession={onArchiveSession}
+                    onSelectSession={onSelectSession}
+                    onSetSessionPinned={onSetSessionPinned}
+                  />
+                ) : null}
                 <SortableContext items={rootGroupIds} strategy={verticalListSortingStrategy}>
                   {rootGroups.map((group) => (
                     <SortableWorkspaceFolder
@@ -653,19 +666,6 @@ export function Sidebar(props: SidebarProps) {
                     />
                   </section>
                 ))}
-                {pinnedThreads.length > 0 ? (
-                  <PinnedThreadsSection
-                    pinnedThreads={pinnedThreads}
-                    sortableIds={pinnedSortableIds}
-                    sortableIdForThread={pinnedSortableId}
-                    selectedWorkspace={selectedWorkspace}
-                    selectedSession={selectedSession}
-                    threadMenu={threadMenu}
-                    onArchiveSession={onArchiveSession}
-                    onSelectSession={onSelectSession}
-                    onSetSessionPinned={onSetSessionPinned}
-                  />
-                ) : null}
                 {threadGrouping === "time"
                   ? threadSidebarModel.recencySections.map((section) => (
                       <RecencyThreadSectionView
