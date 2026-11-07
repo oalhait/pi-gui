@@ -91,7 +91,7 @@ test("create with pi prefills the interview draft and does not send", async () =
   }
 });
 
-test("firing a due existing-thread task labels the user bubble and shows a chip", async () => {
+test("firing a due existing-thread task labels the user bubble, pins only while active", async () => {
   test.setTimeout(60_000);
   const userDataDir = await makeUserDataDir();
   const workspacePath = await makeWorkspace("scheduled-fire");
@@ -139,11 +139,47 @@ test("firing a due existing-thread task labels the user bubble and shows a chip"
     await expect(window.getByTestId("sent-by-scheduled-task")).toBeVisible({ timeout: 15_000 });
     await expect(window.getByTestId("transcript")).toContainText("Say ping from scheduled task");
     await expect(window.getByTestId("composer")).toHaveValue(composerDraft);
-    await expect(window.getByTestId("scheduled-task-chip")).toBeVisible();
     const after = await getDesktopState(window);
     expect(after.selectedSessionId).toBe(sessionId);
     expect(after.composerDraft).toBe(composerDraft);
     expect(after.scheduledTasks[0]?.runs[0]?.sessionId).toBe(sessionId);
+
+    // Without a provider the run fails and the task pauses itself. A paused
+    // automation is not pinned above the composer; the thread's "…" menu,
+    // which replaces the editor split button, lists it instead.
+    await expect
+      .poll(async () => (await getDesktopState(window)).scheduledTasks[0]?.status)
+      .toBe("paused");
+    await expect(window.getByTestId("scheduled-task-chip")).toHaveCount(0);
+    await expect(window.locator(".topbar__actions .open-in-editor")).toHaveCount(0);
+    await window.getByTestId("thread-header-menu").click();
+    const menu = window.getByTestId("thread-header-menu-panel");
+    await expect(menu.getByTestId("thread-menu-open-folder")).toBeVisible();
+    const automation = menu.getByTestId("thread-menu-automation");
+    await expect(automation).toHaveCount(1);
+    await expect(automation).toContainText("Due ping");
+    await expect(automation).toContainText("Paused");
+    const toggle = automation.getByTestId("thread-menu-automation-toggle");
+    await expect(toggle).toHaveText("Resume");
+
+    // Resuming pins the live schedule; pausing again unpins it.
+    await toggle.click();
+    await expect
+      .poll(async () => (await getDesktopState(window)).scheduledTasks[0]?.status)
+      .toBe("active");
+    await expect(automation).toContainText("Active");
+    await expect(window.getByTestId("scheduled-task-chip")).toBeVisible();
+    await expect(toggle).toHaveText("Pause");
+    await toggle.click();
+    await expect
+      .poll(async () => (await getDesktopState(window)).scheduledTasks[0]?.status)
+      .toBe("paused");
+    await expect(window.getByTestId("scheduled-task-chip")).toHaveCount(0);
+
+    // A paused automation still opens from the menu.
+    await automation.getByRole("menuitem", { name: /Due ping/ }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(window.getByTestId("scheduled-task-editor")).toBeVisible();
   } finally {
     await harness.close();
   }

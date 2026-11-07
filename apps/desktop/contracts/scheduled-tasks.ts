@@ -411,6 +411,40 @@ export function nonCompletedBindingForSession(
   );
 }
 
+/**
+ * Every task attached to a thread: ones that post into it, and ones the thread
+ * created. Active tasks come first, then paused, then completed.
+ */
+export function scheduledTasksForSession(
+  tasks: readonly ScheduledTaskRecord[],
+  sessionId: string,
+): readonly ScheduledTaskRecord[] {
+  const order: Record<ScheduledTaskStatus, number> = { active: 0, paused: 1, completed: 2 };
+  return tasks
+    .filter(
+      (task) =>
+        (task.target.kind === "existing-thread" && task.target.sessionId === sessionId) ||
+        task.originSessionId === sessionId,
+    )
+    .sort((left, right) => order[left.status] - order[right.status]);
+}
+
+/**
+ * The live schedule posting into a thread, the only kind pinned above its
+ * composer. Paused and completed ones are listed in the thread's "…" menu.
+ */
+export function activeBindingForSession(
+  tasks: readonly ScheduledTaskRecord[],
+  sessionId: string,
+): ScheduledTaskRecord | undefined {
+  return tasks.find(
+    (task) =>
+      task.status === "active" &&
+      task.target.kind === "existing-thread" &&
+      task.target.sessionId === sessionId,
+  );
+}
+
 export function filterScheduledTasks(
   tasks: readonly ScheduledTaskRecord[],
   filter: ScheduledTaskFilter,

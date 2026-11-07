@@ -10,7 +10,9 @@ import type { DesktopAppState, WorkspaceSessionTarget } from "../../../../contra
 import type { PiDesktopApi } from "../../../../contracts/ipc";
 import {
   nonCompletedBindingForSession,
+  scheduledTasksForSession,
   type ScheduledTaskRecord,
+  type ScheduledTaskStatus,
 } from "../../../../contracts/scheduled-tasks";
 import type { ScheduledEditorState } from "../../scheduled-tasks/scheduled-task-editor";
 import {
@@ -58,6 +60,10 @@ export interface ThreadMenuState {
   readonly archive: (target: WorkspaceSessionTarget) => void;
   readonly restore: (target: WorkspaceSessionTarget) => void;
   readonly setPinned: (target: WorkspaceSessionTarget, pinned: boolean) => void;
+  /** Automations attached to a thread, for the header menu. */
+  readonly automationsFor: (sessionId: string) => readonly ScheduledTaskRecord[];
+  readonly openAutomation: (taskId: string) => void;
+  readonly setAutomationStatus: (taskId: string, status: ScheduledTaskStatus) => void;
 }
 
 export function useThreadActions({
@@ -197,5 +203,9 @@ export function useThreadActions({
     archive,
     restore,
     setPinned,
+    automationsFor: (sessionId) => scheduledTasksForSession(scheduledTasks, sessionId),
+    openAutomation: (taskId) => openScheduledEditor({ mode: "edit", taskId }),
+    setAutomationStatus: (taskId, status) =>
+      mutate((desktopApi) => desktopApi.updateScheduledTask(taskId, { status })),
   };
 }

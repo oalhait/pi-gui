@@ -7,7 +7,7 @@ import {
   type CreateScheduledTaskInput,
 } from "../../contracts/desktop-state";
 import {
-  nonCompletedBindingForSession,
+  activeBindingForSession,
   scheduledOriginsByMessageId,
 } from "../../contracts/scheduled-tasks";
 import { updateSnapshot, useDesktopAppState } from "./desktop-app-state";
@@ -272,7 +272,7 @@ export default function App() {
     );
   }, [pins.timeline, selectedSession, selectedWorkspace, snapshot]);
   const scheduledBinding = selectedSession
-    ? nonCompletedBindingForSession(snapshot?.scheduledTasks ?? [], selectedSession.id)
+    ? activeBindingForSession(snapshot?.scheduledTasks ?? [], selectedSession.id)
     : undefined;
   const transcriptHydration = desktop.view.kind === "ready" ? desktop.view.transcript : undefined;
   const transcriptFailed = transcriptHydration?.kind === "failed" ? transcriptHydration : null;
@@ -1023,7 +1023,7 @@ export default function App() {
           panelAvailable={sidePanelAvailable}
           panelVisible={sidePanelVisible}
           editorControl={
-            selectedWorkspace ? (
+            selectedWorkspace && !(snapshot.activeView === "threads" && selectedSession) ? (
               <OpenInEditorButton state={openInEditor} onOpenFolder={openSelectedWorkspaceFolder} />
             ) : undefined
           }
@@ -1038,6 +1038,8 @@ export default function App() {
               runningLabel={runningLabel}
               session={selectedSession}
               threadMenu={threadMenu}
+              openInEditor={openInEditor}
+              onOpenFolder={openSelectedWorkspaceFolder}
             />
           ) : null}
         </Topbar>
