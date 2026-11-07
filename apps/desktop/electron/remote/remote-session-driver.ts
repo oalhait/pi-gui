@@ -26,11 +26,13 @@ import {
   type UnsubscribeParams,
 } from "@pi-gui/remote-protocol";
 import { sessionKey } from "@pi-gui/session-driver";
+import { basename } from "node:path";
 import type {
   SessionDriverEvent,
   SessionEventListener,
   SessionMessageInput,
   SessionRef,
+  SessionSnapshot,
   Unsubscribe,
 } from "@pi-gui/session-driver";
 import type { RemoteCatalogCache, RemoteHostStore } from "./remote-host-store";
@@ -41,6 +43,8 @@ interface Subscription {
   readonly listener: SessionEventListener;
   /** The id on the current connection, while subscribed there. */
   remoteId: string | undefined;
+  /** The last event showed a run in progress; its end may be missed while disconnected. */
+  running: boolean;
 }
 
 export interface RemoteSessionDriverOptions {
@@ -162,12 +166,12 @@ export class RemoteSessionDriver {
         };
       }
     }
+    // A newly added folder is named after its host, so it stands apart from local folders.
+    const known = this.catalog?.workspaces.some((entry) => entry.path === path);
+    const name = displayName ?? (known ? undefined : `${basename(path)} (${this.options.label})`);
     const result = await this.call(
       "syncWorkspace",
-      ...([
-        path,
-        ...(displayName === undefined ? [] : [displayName]),
-      ] as RemoteDriverArgs<"syncWorkspace">),
+      ...([path, ...(name === undefined ? [] : [name])] as RemoteDriverArgs<"syncWorkspace">),
     );
     await this.refreshCatalog().catch(() => undefined);
     return result;
@@ -301,7 +305,12 @@ export class RemoteSessionDriver {
 
   subscribe(sessionRef: SessionRef, listener: SessionEventListener): Unsubscribe {
     const localId = `l${this.nextLocalId++}`;
-    const subscription: Subscription = { sessionRef, listener, remoteId: undefined };
+    const subscription: Subscription = {
+      sessionRef,
+      listener,
+      remoteId: undefined,
+      running: false,
+    };
     this.subscriptions.set(localId, subscription);
     if (this.connected) {
       this.subscribeRemote(subscription).catch((error: unknown) =>
@@ -324,8 +333,12 @@ export class RemoteSessionDriver {
     const peer = this.requirePeer();
     const serverRef = toServerForm(this.options.hostId, subscription.sessionRef);
     const subscriptionId = `r${this.nextRemoteId++}`;
+    const wasRunning = subscription.running;
     // The host only streams sessions it has loaded; after a host restart, load it again.
-    await peer.request(driverMethodName("openSession"), [serverRef]);
+    const snapshot = toDesktopForm(
+      this.options.hostId,
+      await peer.request<SessionSnapshot>(driverMethodName("openSession"), [serverRef]),
+    );
     subscription.remoteId = subscriptionId;
     try {
       await peer.request(SUBSCRIBE_METHOD, {
@@ -338,6 +351,10 @@ export class RemoteSessionDriver {
       }
       throw error;
     }
+    if (wasRunning && snapshot.status !== "running" && subscription.remoteId === subscriptionId) {
+      // The run ended while disconnected, so its runCompleted/runFailed never arrived.
+      this.deliver(subscription, missedRunEnd(snapshot));
+    }
   }
 
   private dispatch(params: SessionEventParams): void {
@@ -347,11 +364,24 @@ export class RemoteSessionDriver {
       }
       const event = toDesktopForm(this.options.hostId, params.event) as SessionDriverEvent;
       this.lastEventAt.set(sessionKey(event.sessionRef), Date.now());
-      Promise.resolve(subscription.listener(event)).catch((error: unknown) =>
-        this.log(`session listener failed: ${String(error)}`),
-      );
+      this.deliver(subscription, event);
       return;
     }
+  }
+
+  private deliver(subscription: Subscription, event: SessionDriverEvent): void {
+    if (event.type === "sessionUpdated") {
+      subscription.running = event.snapshot.status === "running";
+    } else if (
+      event.type === "runCompleted" ||
+      event.type === "runFailed" ||
+      event.type === "sessionClosed"
+    ) {
+      subscription.running = false;
+    }
+    Promise.resolve(subscription.listener(event)).catch((error: unknown) =>
+      this.log(`session listener failed: ${String(error)}`),
+    );
   }
 
   private requirePeer(): RpcPeer {
@@ -369,4 +399,17 @@ export class RemoteSessionDriver {
       `[remote:${this.options.hostId}] ${message}`,
     );
   }
+}
+
+/** The end of a run that finished while the connection was down, rebuilt from the session. */
+function missedRunEnd(snapshot: SessionSnapshot): SessionDriverEvent {
+  const timestamp = new Date().toISOString();
+  return snapshot.lastRunOutcome === "failed"
+    ? {
+        type: "runFailed",
+        sessionRef: snapshot.ref,
+        timestamp,
+        error: { message: "The run failed while pi-gui was disconnected from the host." },
+      }
+    : { type: "runCompleted", sessionRef: snapshot.ref, timestamp, snapshot };
 }

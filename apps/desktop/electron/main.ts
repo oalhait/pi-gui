@@ -22,7 +22,8 @@ import {
 } from "electron";
 import { isValidHttpBaseUrl, type ConnectionResumePolicy } from "@pi-gui/pi-sdk-driver";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type {
   AgentToolResult,
   ExtensionContext,
@@ -50,6 +51,10 @@ import { performExtensionViewHostAction } from "./extensions/extension-view-acti
 import { extensionFrameDocument } from "./extensions/extension-frame-document";
 import { ReviewOwner } from "./workbench/review-owner";
 import { registerDesktopIpc } from "./ipc/register-desktop-ipc";
+import { RemoteHosts } from "./remote/remote-hosts";
+import { RemoteHostStore } from "./remote/remote-host-store";
+import { localCommandRunner, sshCommandRunner } from "./remote/remote-commands";
+import { findHostBundle } from "./remote/host-bundle";
 import {
   createOrchestrationRuntimeExtension,
   createOrchestrationRuntimeTools,
@@ -157,6 +162,7 @@ const windowTestMode = appTestMode ?? "foreground";
 const devReloadMarkersEnabled = process.env.PI_APP_DEV_RELOAD_MARKERS === "1";
 const TURN_CAPTURE_BACKSTOP_MS = 10_000;
 let store: DesktopAppStore;
+let remoteHosts: RemoteHosts | undefined;
 let extensionViewOwner: DesktopExtensionViewOwner | undefined;
 let windowOwner: WindowOwner;
 const themeManager = new ThemeManager();
@@ -1162,8 +1168,51 @@ app
         },
       ],
     };
+    const broadcastRemoteHosts = (hosts: ReturnType<RemoteHosts["states"]>) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.send(desktopIpc.remoteHostsChanged, hosts);
+        }
+      }
+    };
+    remoteHosts = new RemoteHosts({
+      store: new RemoteHostStore(configuredUserDataDir),
+      // PI_GUI_REMOTE_TRANSPORT=local runs the server-side scripts on this computer (tests).
+      runner:
+        process.env.PI_GUI_REMOTE_TRANSPORT === "local" ? localCommandRunner : sshCommandRunner,
+      // PI_GUI_HOST_BUNDLE_DIR replaces the default locations (tests point it at none).
+      bundle: await findHostBundle(
+        process.env.PI_GUI_HOST_BUNDLE_DIR
+          ? [process.env.PI_GUI_HOST_BUNDLE_DIR]
+          : app.isPackaged
+            ? [path.join(process.resourcesPath, "pi-gui-host")]
+            : [path.resolve(app.getAppPath(), "../../packages/pi-gui-host/bundle")],
+      ),
+      client: {
+        // Stable per installation, so the host can tell a reconnect from a new client.
+        id: createHash("sha256")
+          .update(`${hostname()}\0${configuredUserDataDir}`)
+          .digest("hex")
+          .slice(0, 16),
+        name: `pi-gui on ${hostname()}`,
+        version: app.getVersion(),
+      },
+      onStateChanged: broadcastRemoteHosts,
+      onResynced: (hostId) => {
+        store?.resyncRemoteHost(hostId).catch((error: unknown) => {
+          console.error(`[main] resync after reconnecting to ${hostId} failed`, error);
+        });
+      },
+      onCatalogChanged: () => {
+        store?.refreshRemoteCatalog().catch((error: unknown) => {
+          console.error("[main] refreshing remote folders failed", error);
+        });
+      },
+    });
+    await remoteHosts.initialize();
     store = new DesktopAppStore({
       userDataDir: configuredUserDataDir,
+      remoteHosts,
       initialWorkspacePaths: resolveInitialWorkspacePaths(),
       getWindow: () => mainWindow,
       shouldKeepSessionDialogs: (sessionRef) =>
@@ -1381,6 +1430,7 @@ app
         getFileDiff,
         stageFile,
         relaunchApplication: requestApplicationRelaunch,
+        remoteHosts: () => remoteHosts!,
       },
     });
 
@@ -1437,6 +1487,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  // Only the connections: chats keep running on each host's server.
+  remoteHosts?.disposeAll();
   stopNotifications?.();
   stopNotifications = undefined;
   notificationManager = undefined;

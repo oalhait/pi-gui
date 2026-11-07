@@ -29,6 +29,7 @@ import { WorkbenchRequests, type WorkbenchOwner } from "./workbench-requests";
 import type { DesktopExtensionViewOwner } from "../extensions/extension-view-owner";
 import { registerExtensionViewRequests } from "./extension-view-requests";
 import { registerReviewRequests, type ReviewRequestsOwner } from "./review-requests";
+import { registerRemoteHostRequests, type RemoteHostRequestsOwner } from "./remote-host-requests";
 import { mainFrameHandler } from "./main-frame-ipc";
 import { assertComposerAttachmentPixels } from "./composer-attachment-pixels";
 import {
@@ -237,6 +238,7 @@ export interface DesktopIpcCapabilities {
     options: { readonly sourcePath?: string },
   ) => Promise<void>;
   readonly relaunchApplication: () => void;
+  readonly remoteHosts: () => RemoteHostRequestsOwner;
 }
 
 export interface RegisterDesktopIpcOptions {
@@ -257,6 +259,7 @@ export function registerDesktopIpc({
   const handleMainFrame = mainFrameHandler(windows);
   registerBrowserRequests(handleMainFrame, windows);
   registerReviewRequests(handleMainFrame, owners.review);
+  registerRemoteHostRequests(handleMainFrame, capabilities.remoteHosts);
   registerExtensionViewRequests(handleMainFrame, windows, owners.extensionViews);
   const workbench = new WorkbenchRequests(owners.workbench);
   const workbenchSenders = new WeakSet<Electron.WebContents>();
