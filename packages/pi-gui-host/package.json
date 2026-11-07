@@ -1,0 +1,35 @@
+{
+  "name": "@pi-gui/pi-gui-host",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Server that runs pi-gui chats on a remote machine. pi-gui connects to it over SSH.",
+  "bin": {
+    "pi-gui-host": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test \"test/**/*.test.mts\"",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@pi-gui/catalogs": "workspace:*",
+    "@pi-gui/pi-sdk-driver": "workspace:*",
+    "@pi-gui/remote-protocol": "workspace:*",
+    "@pi-gui/session-driver": "workspace:*"
+  }
+}
