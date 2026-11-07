@@ -18,7 +18,6 @@ import {
 import { applySnapshotIfNewer } from "../../../app/desktop-app-state";
 import type { PiDesktopApi } from "../../../../contracts/ipc";
 import { resolveRepoWorkspaceId } from "../../../../contracts/workspace-roots";
-import { stripThreadReferences } from "../../../../contracts/thread-references";
 
 interface TreeModalState {
   readonly open: boolean;
@@ -102,26 +101,12 @@ export function useTreeForkModals(params: UseTreeForkModalsParams) {
       editingMessage.current = true;
       const sessionKey = selectedSessionKey;
       setEditError(undefined);
-      // Rewind in place, as pi's /tree does for a user entry: the thread moves to just before
-      // the message, its text returns to the composer, and later turns stay in /tree.
+      // Main keeps the saved draft for Cancel to give back.
+      flushComposerDraft();
       void api
-        .rewindToMessage(
-          { workspaceId: selectedWorkspace.id, sessionId: selectedSession.id },
-          message.sourceMessageId ?? message.id,
-        )
-        .then(async ({ state, result }) => {
+        .startMessageEdit(message.sourceMessageId ?? message.id)
+        .then((state) => {
           applySnapshotIfNewer(setSnapshot, state);
-          if (result.cancelled || result.aborted) return;
-          // Sending again adds the mentioned threads' ids back.
-          setComposerDraft(stripThreadReferences(result.editorText ?? ""));
-          if (message.attachments?.length) {
-            const attachments = message.attachments.map((attachment) => ({
-              ...attachment,
-              name: attachment.name ?? "Image",
-              id: crypto.randomUUID(),
-            }));
-            applySnapshotIfNewer(setSnapshot, await api.addComposerAttachments(attachments));
-          }
           focusComposer();
         })
         .catch((error: unknown) => {

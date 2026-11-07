@@ -299,7 +299,8 @@ export function useNewThreadController(params: UseNewThreadControllerParams) {
     }
     const input: StartThreadInput = {
       rootWorkspaceId,
-      environment,
+      // A top-level chat has no repository to make a worktree from.
+      environment: workspace?.kind === "chats" ? "local" : environment,
       prompt: prompt.trimStart().startsWith("/")
         ? prompt
         : withThreadReferences(prompt, mentionMenu.threadTargets),
@@ -344,6 +345,7 @@ export function useNewThreadController(params: UseNewThreadControllerParams) {
     resolvedThinkingLevel,
     rootWorkspaceId,
     setSnapshot,
+    workspace?.kind,
   ]);
 
   const handleComposerPaste = useCallback(

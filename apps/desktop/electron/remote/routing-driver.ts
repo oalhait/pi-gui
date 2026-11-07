@@ -118,6 +118,19 @@ export class RoutingDriver implements DesktopDriver {
     return this.route("forkSession", ...args);
   }
 
+  /** Moves stay on this computer: the remote protocol has no move yet. */
+  moveSession(...args: Parameters<PiSdkDriver["moveSession"]>) {
+    if (
+      targetHostId(args[0]) !== undefined ||
+      targetHostId(args[1].targetWorkspace) !== undefined
+    ) {
+      return Promise.reject(
+        new RemoteError("Threads on a remote host can't move yet.", ErrorCodes.unavailable),
+      );
+    }
+    return this.local.moveSession(...args);
+  }
+
   openSession(...args: RemoteDriverArgs<"openSession">) {
     return this.route("openSession", ...args);
   }
