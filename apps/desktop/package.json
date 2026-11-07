@@ -103,6 +103,7 @@
     "@pi-gui/catalogs": "workspace:*",
     "@pi-gui/extension-ui": "workspace:*",
     "@pi-gui/pi-sdk-driver": "workspace:*",
+    "@pi-gui/remote-protocol": "workspace:*",
     "@pi-gui/session-driver": "workspace:*",
     "@silvia-odwyer/photon-node": "0.3.4",
     "@smithy/core": "^3.29.0",
